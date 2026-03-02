@@ -46,7 +46,13 @@ async function downloadPdf() {
     const r = await fetch("/api/pdf", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(last)
+      body: JSON.stringify({
+        orderNumber: last.orderNumber,
+        pickupLocation: last.pickupLocation,
+        deliveryLocation: last.deliveryLocation,
+        token: last.token,
+        expiresInMinutes: last.expiresInMinutes
+      })
     });
 
     if (!r.ok) {
@@ -55,21 +61,22 @@ async function downloadPdf() {
     }
 
     const blob = await r.blob();
-    const url = URL.createObjectURL(blob);
+    const url = window.URL.createObjectURL(blob);
 
     const a = document.createElement("a");
     a.href = url;
-    a.download = `milestone-qr-${last.orderNumber}.pdf`;
+    a.download = `FRO_${last.orderNumber}.pdf`;
     document.body.appendChild(a);
     a.click();
+
     a.remove();
-    URL.revokeObjectURL(url);
+    window.URL.revokeObjectURL(url);
+
   } catch (e) {
-    out.style.display = "block";
-    out.innerHTML = `<span style="color:#c22"><b>Error:</b> ${escapeHtml(e.message)}</span>`;
+    alert(e.message);
   } finally {
     pdfBtn.disabled = false;
-    pdfBtn.textContent = "Download PDF (with QR)";
+    pdfBtn.textContent = "Download PDF";
   }
 }
 

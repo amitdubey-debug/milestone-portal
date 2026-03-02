@@ -276,93 +276,224 @@ app.post("/api/ping", (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- PDF ----------
 app.post("/api/pdf", async (req, res) => {
-  const { orderNumber, pickupLocation, deliveryLocation, expiresInMinutes, token } = req.body || {};
-  if (!orderNumber || !pickupLocation || !deliveryLocation || !token) {
-    return res.status(400).json({ error: "Missing required fields for PDF" });
+  // Values we DO have today from generate flow:
+  // orderNumber, pickupLocation, deliveryLocation, token, expiresInMinutes
+  // Everything else: dummy placeholders (as requested)
+  const {
+    orderNumber,
+    pickupLocation,
+    deliveryLocation,
+    expiresInMinutes,
+    token,
+
+    // optional future fields (safe if not provided)
+    vendorName,
+    vendorCode,
+    driverName,
+    driverPhone,
+    vehicleNo,
+    trailerNo,
+    bookingNo,
+    customerName,
+    serviceProduct,
+    cargoType,
+    remarks
+  } = req.body || {};
+
+  if (!orderNumber || !token) {
+    return res.status(400).json({ error: "Missing required fields for PDF: orderNumber, token" });
   }
 
   const baseUrl = baseUrlFromReq(req);
 
+  // ---------- Core links ----------
+  // Landing = full driver page
   const landingUrl = `${baseUrl}/s/${createShortCode(token)}`;
+
+  // PDF buttons (one-tap submit) -> quick page
   const pickupUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=PICKED_UP`;
   const deliveredUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=DELIVERED`;
   const delayUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=DELAY`;
 
-  const qrPngBuffer = await QRCode.toBuffer(landingUrl, { width: 460, margin: 1 });
+  // ---------- WhatsApp QR ----------
+  // Phone must be digits only for wa.me (no +, no dashes)
+  const whatsappNumber = "447345485597"; // +44-7345485597
+  const whatsappText = `Order ${orderNumber}`;
+  const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(whatsappText)}`;
 
+  // ---------- QR images ----------
+  const landingQrPng = await QRCode.toBuffer(landingUrl, { width: 520, margin: 1 });
+  const whatsappQrPng = await QRCode.toBuffer(whatsappUrl, { width: 520, margin: 1 });
+
+  // ---------- Dummy placeholders (if missing) ----------
+  const dPickup = pickupLocation || "Dummy Pickup Location";
+  const dDelivery = deliveryLocation || "Dummy Delivery Location";
+
+  const dVendorName = vendorName || "DUMMY VENDOR LTD";
+  const dVendorCode = vendorCode || "VN-000000";
+  const dDriverName = driverName || "DRIVER NAME";
+  const dDriverPhone = driverPhone || "+00 0000 000000";
+  const dVehicleNo = vehicleNo || "TRUCK-0000";
+  const dTrailerNo = trailerNo || "TRL-0000";
+
+  const dBookingNo = bookingNo || String(orderNumber);
+  const dCustomerName = customerName || "DUMMY CUSTOMER";
+  const dServiceProduct = serviceProduct || "Landside Transport";
+  const dCargoType = cargoType || "General cargo";
+  const dRemarks = remarks || "—";
+
+  const now = new Date();
+  const createdUtc = now.toISOString();
+
+  // ---------- PDF response headers ----------
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader(
     "Content-Disposition",
-    `attachment; filename="milestone-qr-${String(orderNumber).replace(/[^a-zA-Z0-9_-]/g, "")}.pdf"`
+    `attachment; filename="FRO_${String(orderNumber).replace(/[^a-zA-Z0-9_-]/g, "")}.pdf"`
   );
 
-  const doc = new PDFDocument({ size: "A4", margin: 44 });
+  const doc = new PDFDocument({ size: "A4", margin: 36 });
   doc.pipe(res);
 
-  const left = doc.page.margins.left;
-  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const pageLeft = doc.page.margins.left;
+  const pageRight = doc.page.width - doc.page.margins.right;
+  const pageWidth = pageRight - pageLeft;
 
-  doc.font("Helvetica-Bold").fontSize(18).fillColor("#000").text("Milestone Update", left, 56);
-  doc.font("Helvetica").fontSize(11).fillColor("#555")
-    .text("PDF buttons = one-tap submit. QR = open full page.", left, 78);
-  doc.fillColor("#000");
+  // Helpers
+  const hLine = (y) => {
+    doc.moveTo(pageLeft, y).lineTo(pageRight, y).strokeColor("#DADDE6").lineWidth(1).stroke();
+  };
 
-  doc.moveTo(left, 100).lineTo(left + width, 100).strokeColor("#DDD").stroke();
+  const labelValue = (label, value, x, y, w) => {
+    doc.font("Helvetica-Bold").fontSize(9).fillColor("#334155").text(label, x, y, { width: w });
+    doc.font("Helvetica").fontSize(11).fillColor("#0f172a").text(value, x, y + 12, { width: w });
+  };
 
-  let y = 118;
-  doc.font("Helvetica-Bold").fontSize(14).text(`Order: ${orderNumber}`, left, y);
-  y += 22;
-  doc.font("Helvetica").fontSize(12).text(`Pick up: ${pickupLocation}`, left, y);
-  y += 18;
-  doc.text(`Delivery: ${deliveryLocation}`, left, y);
-  y += 18;
-  doc.font("Helvetica").fontSize(10).fillColor("#666").text(`Link expires in ${expiresInMinutes ?? ""} minutes`, left, y);
-  doc.fillColor("#000");
+  const sectionTitle = (title, y) => {
+    doc.roundedRect(pageLeft, y, pageWidth, 24, 8).fillColor("#EEF2FF").fill();
+    doc.font("Helvetica-Bold").fontSize(11).fillColor("#1e293b").text(title, pageLeft + 10, y + 6);
+    doc.fillColor("#0f172a");
+    return y + 34;
+  };
 
-  y += 18;
-  doc.moveTo(left, y).lineTo(left + width, y).strokeColor("#DDD").stroke();
-  y += 18;
+  const linkBox = (title, subtitle, url, y) => {
+    const h = 58;
+    doc.roundedRect(pageLeft, y, pageWidth, h, 10).lineWidth(1).strokeColor("#D0D0D0").stroke();
+    doc.link(pageLeft, y, pageWidth, h, url);
+    doc.font("Helvetica-Bold").fontSize(12).fillColor("#0f172a").text(title, pageLeft + 12, y + 10, { width: pageWidth - 24 });
+    doc.font("Helvetica").fontSize(10).fillColor("#64748b").text(subtitle, pageLeft + 12, y + 30, { width: pageWidth - 24 });
+    doc.fillColor("#0f172a");
+    return y + h + 10;
+  };
 
-  const qrSize = 220;
-  doc.image(qrPngBuffer, left, y, { fit: [qrSize, qrSize] });
+  // ---------- Header (FRO-like) ----------
+  doc.font("Helvetica-Bold").fontSize(18).fillColor("#0f172a").text("EXPORT WORK ORDER", pageLeft, 24);
+  doc.font("Helvetica").fontSize(9).fillColor("#64748b").text(`Created (UTC): ${createdUtc}`, pageLeft, 46);
+  doc.font("Helvetica-Bold").fontSize(12).fillColor("#0f172a").text(`Order / WO: ${orderNumber}`, pageRight - 220, 28, { width: 220, align: "right" });
+  doc.font("Helvetica").fontSize(9).fillColor("#64748b").text(`Booking: ${dBookingNo}`, pageRight - 220, 46, { width: 220, align: "right" });
 
-  const stepsX = left + qrSize + 18;
-  const stepsW = left + width - stepsX;
-  doc.font("Helvetica-Bold").fontSize(14).text("Driver steps", stepsX, y);
-  doc.font("Helvetica").fontSize(12).fillColor("#000");
+  hLine(64);
 
-  const steps = ["1) Tap a PDF button.", "2) Browser opens.", "3) Allow location (recommended).", "4) Submitted."];
-  let sy = y + 24;
-  for (const s of steps) { doc.text(s, stepsX, sy, { width: stepsW }); sy += 18; }
+  // ---------- Top details grid ----------
+  let y = 74;
+  const colGap = 14;
+  const colW = (pageWidth - colGap) / 2;
 
-  y = y + qrSize + 24;
-  doc.font("Helvetica-Bold").fontSize(12).text("Tap buttons (clickable links):", left, y);
-  y += 14;
+  labelValue("Customer", dCustomerName, pageLeft, y, colW);
+  labelValue("Service / Product", dServiceProduct, pageLeft + colW + colGap, y, colW);
 
-  function linkBox(title, subtitle, url) {
-    const h = 66;
-    doc.roundedRect(left, y, width, h, 10).lineWidth(1).strokeColor("#D0D0D0").stroke();
-    doc.link(left, y, width, h, url);
-    doc.fillColor("#000").font("Helvetica-Bold").fontSize(12).text(title, left + 14, y + 12, { width: width - 28 });
-    doc.fillColor("#666").font("Helvetica").fontSize(10).text(subtitle, left + 14, y + 32, { width: width - 28 });
-    doc.fillColor("#000");
-    y += h + 10;
-  }
+  y += 40;
+  labelValue("Vendor", `${dVendorName} (${dVendorCode})`, pageLeft, y, colW);
+  labelValue("Cargo Type", dCargoType, pageLeft + colW + colGap, y, colW);
 
-  linkBox(`[PICK UP]  ${pickupLocation}`, "One-tap submit PICKED_UP (uses GPS if allowed).", pickupUrl);
-  linkBox(`[DELIVERED]  ${deliveryLocation}`, "One-tap submit DELIVERED (uses GPS if allowed).", deliveredUrl);
-  linkBox(`[DELAY]`, "Opens delay reason page (then submit).", delayUrl);
+  y += 42;
+  hLine(y);
+  y += 12;
 
-  y += 6;
-  doc.moveTo(left, y).lineTo(left + width, y).strokeColor("#DDD").stroke();
-  y += 14;
+  // ---------- Locations ----------
+  y = sectionTitle("Locations", y);
 
-  doc.font("Helvetica-Bold").fontSize(12).fillColor("#000").text("Fallback link (opens full page):", left, y);
+  labelValue("Pick up", dPickup, pageLeft, y, colW);
+  labelValue("Delivery", dDelivery, pageLeft + colW + colGap, y, colW);
+
+  y += 48;
+  hLine(y);
+  y += 12;
+
+  // ---------- Driver / Equipment ----------
+  y = sectionTitle("Driver & Equipment", y);
+
+  labelValue("Driver", dDriverName, pageLeft, y, colW);
+  labelValue("Driver Phone", dDriverPhone, pageLeft + colW + colGap, y, colW);
+
+  y += 40;
+  labelValue("Vehicle No.", dVehicleNo, pageLeft, y, colW);
+  labelValue("Trailer No.", dTrailerNo, pageLeft + colW + colGap, y, colW);
+
+  y += 44;
+  hLine(y);
+  y += 12;
+
+  // ---------- Milestone Updates (PDF buttons) ----------
+  y = sectionTitle("Milestone Update (Tap buttons below)", y);
+
+  y = linkBox(`[PICK UP]  ${dPickup}`, "One tap submit PICKED_UP (GPS if allowed).", pickupUrl, y);
+  y = linkBox(`[DELIVERED]  ${dDelivery}`, "One tap submit DELIVERED (GPS if allowed).", deliveredUrl, y);
+  y = linkBox(`[DELAY]`, "Opens delay reason page, then submit (GPS if allowed).", delayUrl, y);
+
+  doc.font("Helvetica").fontSize(9).fillColor("#64748b")
+    .text("Note: If location permission is blocked, the event is still submitted (without GPS).", pageLeft, y);
+  doc.fillColor("#0f172a");
   y += 16;
 
-  doc.font("Helvetica").fontSize(11).fillColor("#000").text(landingUrl, left, y, { width });
-  doc.link(left, y - 2, width, 16, landingUrl);
+  // ---------- QR Codes section ----------
+  y = sectionTitle("Scan QR Codes", y);
+
+  const qrSize = 170;
+  // Left QR: full page
+  doc.font("Helvetica-Bold").fontSize(10).fillColor("#0f172a").text("Driver update page", pageLeft, y);
+  doc.image(landingQrPng, pageLeft, y + 14, { fit: [qrSize, qrSize] });
+  doc.font("Helvetica").fontSize(8).fillColor("#64748b")
+    .text("Scan to open full page (buttons + tracking).", pageLeft, y + 14 + qrSize + 6, { width: qrSize });
+
+  // Right QR: WhatsApp
+  const rightX = pageLeft + qrSize + 30;
+  doc.font("Helvetica-Bold").fontSize(10).fillColor("#0f172a").text("Share via WhatsApp", rightX, y);
+  doc.image(whatsappQrPng, rightX, y + 14, { fit: [qrSize, qrSize] });
+  doc.font("Helvetica").fontSize(8).fillColor("#64748b")
+    .text(`Opens WhatsApp to +44 7345 485597 with message:\n"Order ${orderNumber}"`, rightX, y + 14 + qrSize + 6, { width: qrSize });
+
+  y = y + 14 + qrSize + 42;
+
+  // WhatsApp clickable link
+  doc.font("Helvetica-Bold").fontSize(10).fillColor("#0f172a").text("WhatsApp link:", pageLeft, y);
+  y += 12;
+  doc.font("Helvetica").fontSize(9).fillColor("#1d4ed8").text(whatsappUrl, pageLeft, y, { width: pageWidth });
+  doc.link(pageLeft, y - 2, pageWidth, 14, whatsappUrl);
+  doc.fillColor("#0f172a");
+  y += 22;
+
+  // Landing fallback clickable
+  doc.font("Helvetica-Bold").fontSize(10).fillColor("#0f172a").text("Fallback link (driver page):", pageLeft, y);
+  y += 12;
+  doc.font("Helvetica").fontSize(9).fillColor("#1d4ed8").text(landingUrl, pageLeft, y, { width: pageWidth });
+  doc.link(pageLeft, y - 2, pageWidth, 14, landingUrl);
+  doc.fillColor("#0f172a");
+  y += 22;
+
+  // ---------- Remarks ----------
+  y = sectionTitle("Remarks", y);
+  doc.font("Helvetica").fontSize(10).fillColor("#0f172a").text(dRemarks, pageLeft, y, { width: pageWidth });
+  doc.fillColor("#0f172a");
+
+  // Footer
+  doc.font("Helvetica").fontSize(8).fillColor("#94a3b8")
+    .text(`Generated by Milestones Portal • Expires in: ${expiresInMinutes ?? "—"} minutes`, pageLeft, doc.page.height - 28, {
+      width: pageWidth,
+      align: "center"
+    });
 
   doc.end();
 });
