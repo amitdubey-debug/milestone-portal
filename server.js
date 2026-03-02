@@ -441,17 +441,43 @@ function oneLineByWidth(doc, value, maxWidth, fontName = "Helvetica", fontSize =
   }
   return out + "…";
 }
+function truncateToWidth(doc, text, maxWidth, font = "Helvetica", fontSize = 9) {
+  const s = String(text ?? "");
+  doc.font(font).fontSize(fontSize);
 
-const row = (label, value, xLabel, xValue, y) => {
-  const labelW = (xValue - xLabel) - 8;
-  const valueW = (R - 10) - xValue; // small right padding
+  // If it already fits, return as-is
+  if (doc.widthOfString(s) <= maxWidth) return s;
 
-  txt(label, xLabel, y, 9, true, { width: labelW });
+  // Add ellipsis
+  const ell = "…";
+  const ellW = doc.widthOfString(ell);
+  if (ellW >= maxWidth) return ""; // maxWidth too small
 
-  const safe = oneLineByWidth(doc, value, valueW, "Helvetica", 9);
+  let lo = 0;
+  let hi = s.length;
 
-  // IMPORTANT: do NOT allow wrapping
-  txt(safe, xValue, y, 9, false, { width: valueW, lineBreak: false });
+  // binary search for max substring that fits with ellipsis
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    const part = s.slice(0, mid);
+    const w = doc.widthOfString(part);
+    if (w + ellW <= maxWidth) lo = mid;
+    else hi = mid - 1;
+  }
+
+  return s.slice(0, lo) + ell;
+}
+
+const row = (label, value, xLabel, xValue, y, labelMaxW, valueMaxW, labelFont = 9, valueFont = 9) => {
+  const lmW = labelMaxW ?? (xValue - xLabel - 8);
+  const vmW = valueMaxW ?? (R - 10 - xValue);
+
+  const safeLabel = truncateToWidth(doc, label, lmW, "Helvetica-Bold", labelFont);
+  const safeValue = truncateToWidth(doc, value, vmW, "Helvetica", valueFont);
+
+  // IMPORTANT: do NOT allow wrapping (no width-based wrapping)
+  txt(safeLabel, xLabel, y, labelFont, true, { lineBreak: false });
+  txt(safeValue, xValue, y, valueFont, false, { lineBreak: false });
 };
 
   // ===================== PAGE 1 =====================
@@ -475,8 +501,11 @@ const row = (label, value, xLabel, xValue, y) => {
 
   // Right section positions
 const xLabelR = L + 315;
-const xValueR = L + 455;      // must be < R
-const rightValueW = R - xValueR; // auto width until margin
+const xValueR = L + 470;      // must be < R
+const rightLabelW = xValueR - xLabelR - 10;
+const rightValueW = R - 10 - xValueR;
+const leftLabelW = xValueL - xLabelL - 10;
+const leftValueW = (xLabelR - 20) - xValueL; // keep some gap before right column starts
 
   // Transport by block (left)
   txt("Transport By", xLabelL, 210, 9, true);
@@ -486,62 +515,27 @@ const rightValueW = R - xValueR; // auto width until margin
   txt(d.transportByCountry, xValueL, 242, 9, false);
 
   // Booking / BL / Customer (left list)
-  row("Booking Number", d.bookingNumber, xLabelL, xValueL, 270, 260);
-  row("B/L Number", d.blNumber, xLabelL, xValueL, 288, 260);
-  row("Customer Name", d.customerName, xLabelL, xValueL, 306, 260);
+row("Booking Number", d.bookingNumber, xLabelL, xValueL, 270, leftLabelW, leftValueW);
+row("B/L Number", d.blNumber, xLabelL, xValueL, 288, leftLabelW, leftValueW);
+row("Customer Name", d.customerName, xLabelL, xValueL, 306, leftLabelW, leftValueW);
 
-  // Right list (like sample)
-  row("Work Order Number", d.workOrderNumber, xLabelR, xValueR, 200, rightValueW);
-  row("Forwarding Order Number", d.forwardingOrderNumber, xLabelR, xValueR, 218, 220, rightValueW);
+row("Work Order Number", d.workOrderNumber, xLabelR, xValueR, 200, rightLabelW, rightValueW);
+row("Forwarding Order Number", d.forwardingOrderNumber, xLabelR, xValueR, 218, rightLabelW, rightValueW);
 
-  row("Transport Mode", d.transportMode, xLabelR, xValueR, 246, 220, rightValueW);
-  row("Ocean Carrier", d.oceanCarrier, xLabelR, xValueR, 264, 220, rightValueW);
-  row("Move Type", d.moveType, xLabelR, xValueR, 282, 220, rightValueW);
+row("Transport Mode", d.transportMode, xLabelR, xValueR, 246, rightLabelW, rightValueW);
+row("Ocean Carrier", d.oceanCarrier, xLabelR, xValueR, 264, rightLabelW, rightValueW);
+row("Move Type", d.moveType, xLabelR, xValueR, 282, rightLabelW, rightValueW);
 
-  row("Earliest Port Receipt Date", d.earliestPortReceiptDate, xLabelR, xValueR, 310, 220, rightValueW);
-  row("Vessel Cutoff Date", d.vesselCutoffDate, xLabelR, xValueR, 328, 220, rightValueW);
-  row("Vessel Departure Date", d.vesselDepartureDate, xLabelR, xValueR, 346, 220, rightValueW);
-  row("Vessel/Voyage", d.vesselVoyage, xLabelR, xValueR, 364, 220, rightValueW);
+row("Earliest Port Receipt Date", d.earliestPortReceiptDate, xLabelR, xValueR, 310, rightLabelW, rightValueW, 8, 8);
+row("Vessel Cutoff Date", d.vesselCutoffDate, xLabelR, xValueR, 328, rightLabelW, rightValueW, 8, 8);
+row("Vessel Departure Date", d.vesselDepartureDate, xLabelR, xValueR, 346, rightLabelW, rightValueW, 8, 8);
+row("Vessel/Voyage", d.vesselVoyage, xLabelR, xValueR, 364, rightLabelW, rightValueW, 8, 8);
 
-const valueW_R = (R - 10) - xValueR;
-
-const smallFont = 8;
-
-txt(
-  truncateToWidth(doc, d.portOfLoading, rightValueW, "Helvetica", smallFont),
-  xValueR,
-  410,
-  smallFont,
-  false,
-  { width: rightValueW, lineBreak: false }
-);
-
-txt(
-  truncateToWidth(doc, d.nextPort, rightValueW, "Helvetica", smallFont),
-  xValueR,
-  428,
-  smallFont,
-  false,
-  { width: rightValueW, lineBreak: false }
-);
-
-txt(
-  truncateToWidth(doc, d.portOfDischarge, rightValueW, "Helvetica", smallFont),
-  xValueR,
-  446,
-  smallFont,
-  false,
-  { width: rightValueW, lineBreak: false }
-);
-
-txt(
-  truncateToWidth(doc, d.placeOfDelivery, rightValueW, "Helvetica", smallFont),
-  xValueR,
-  464,
-  smallFont,
-  false,
-  { width: rightValueW, lineBreak: false }
-);
+row("Place of Receipt", d.placeOfReceipt, xLabelR, xValueR, 392, rightLabelW, rightValueW, 8, 8);
+row("Port of Loading", d.portOfLoading, xLabelR, xValueR, 410, rightLabelW, rightValueW, 8, 8);
+row("Next Port", d.nextPort, xLabelR, xValueR, 428, rightLabelW, rightValueW, 8, 8);
+row("Port of Discharge", d.portOfDischarge, xLabelR, xValueR, 446, rightLabelW, rightValueW, 8, 8);
+row("Place of Delivery", d.placeOfDelivery, xLabelR, xValueR, 464, rightLabelW, rightValueW, 8, 8);
 
   // Equipment & Cargo header with lines (sample)
   hline(510);
@@ -687,9 +681,8 @@ const linkY = qy + qrSize + 34;
 
 txt2(driverLinkLabel, L2 + 40, linkY, 10, true);
 
-const linkX =
-  L2 + 40 +
-  doc.widthOfString(driverLinkLabel, { font: "Helvetica-Bold", size: 10 });
+doc.font("Helvetica-Bold").fontSize(10);
+const linkX = L2 + 40 + doc.widthOfString(driverLinkLabel);
 
 txt2(landingUrl, linkX, linkY, 10, false, {
   width: W2 - 60 - (linkX - L2)
