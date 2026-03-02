@@ -84,17 +84,17 @@ genBtn.addEventListener("click", async () => {
       <div style="margin-top:6px" class="muted">Token expires in ${data.expiresInMinutes} minutes</div>
     `;
 
-    // Show QR from server
+    // QR from server (points to /oneclick pickup)
     qrImg.src = data.qrDataUrl;
     qrWrap.style.display = "block";
 
-    // Save details for PDF generation
+    // store for PDF generation (IMPORTANT: include token)
     last = {
       orderNumber: payload.orderNumber,
       pickupLocation: payload.pickupLocation,
       deliveryLocation: payload.deliveryLocation,
       expiresInMinutes: data.expiresInMinutes,
-      link: data.link
+      token: data.token
     };
 
     pdfBtn.style.display = "inline-block";

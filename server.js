@@ -63,10 +63,10 @@ app.get("/", (req, res) => res.redirect("/generate"));
 app.get("/generate", (req, res) => res.sendFile(path.join(__dirname, "public", "generate.html")));
 app.get("/dashboard", (req, res) => res.sendFile(path.join(__dirname, "public", "dashboard.html")));
 app.get("/milestone", (req, res) => res.sendFile(path.join(__dirname, "public", "milestone.html")));
+app.get("/oneclick", (req, res) => res.sendFile(path.join(__dirname, "public", "oneclick.html")));
 
 /**
  * POST /api/link
- * body: { orderNumber, pickupLocation, deliveryLocation, ttlMinutes }
  */
 app.post("/api/link", async (req, res) => {
   const { orderNumber, pickupLocation, deliveryLocation, ttlMinutes } = req.body || {};
@@ -78,7 +78,7 @@ app.post("/api/link", async (req, res) => {
   }
 
   const requested = Number(ttlMinutes);
-  const maxMinutes = 60 * 24 * 30; // 30 days
+  const maxMinutes = 60 * 24 * 30;
   const effectiveTtl =
     Number.isFinite(requested) && requested > 0 ? Math.min(requested, maxMinutes) : TOKEN_TTL_MINUTES;
 
@@ -101,15 +101,16 @@ app.post("/api/link", async (req, res) => {
   const link = `${baseUrl}/milestone?token=${encodeURIComponent(token)}`;
   const dashboard = `${baseUrl}/dashboard?order=${encodeURIComponent(orderNumber)}`;
 
-  // ✅ server-side QR (no CDN)
-  const qrPngBuffer = await QRCode.toBuffer(link, { width: 340, margin: 1 });
+  // QR points to oneclick page by default (faster for drivers)
+  const oneclickDefault = `${baseUrl}/oneclick?token=${encodeURIComponent(token)}&type=PICKED_UP`;
+  const qrPngBuffer = await QRCode.toBuffer(oneclickDefault, { width: 340, margin: 1 });
   const qrDataUrl = `data:image/png;base64,${qrPngBuffer.toString("base64")}`;
 
   res.json({ link, dashboard, token, expiresInMinutes: effectiveTtl, qrDataUrl });
 });
 
 /**
- * GET /api/context?token=...
+ * Token context
  */
 app.get("/api/context", (req, res) => {
   const token = req.query.token;
@@ -130,7 +131,6 @@ app.get("/api/context", (req, res) => {
 
 /**
  * SSE stream
- * GET /api/stream?order=ORDERNO
  */
 app.get("/api/stream", (req, res) => {
   const order = String(req.query.order || "");
@@ -160,8 +160,7 @@ app.get("/api/stream", (req, res) => {
 });
 
 /**
- * POST /api/submit
- * body: { token, milestoneType, delayReason?, delayNotes?, geo? }
+ * Submit milestone
  */
 app.post("/api/submit", (req, res) => {
   const { token, milestoneType, delayReason, delayNotes, geo } = req.body || {};
@@ -214,19 +213,25 @@ app.post("/api/submit", (req, res) => {
 });
 
 /**
- * POST /api/pdf
- * body: { orderNumber, pickupLocation, deliveryLocation, expiresInMinutes, link }
- * returns application/pdf
+ * PDF with clickable "buttons" (they are links to /oneclick)
  */
 app.post("/api/pdf", async (req, res) => {
-  const { orderNumber, pickupLocation, deliveryLocation, expiresInMinutes, link } = req.body || {};
+  const { orderNumber, pickupLocation, deliveryLocation, expiresInMinutes, token } = req.body || {};
 
-  if (!orderNumber || !pickupLocation || !deliveryLocation || !link) {
+  if (!orderNumber || !pickupLocation || !deliveryLocation || !token) {
     return res.status(400).json({ error: "Missing required fields for PDF" });
   }
 
-  // Generate QR again server-side
-  const qrPngBuffer = await QRCode.toBuffer(link, { width: 460, margin: 1 });
+  const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  const baseUrl = `${proto}://${host}`;
+
+  const pickupUrl = `${baseUrl}/oneclick?token=${encodeURIComponent(token)}&type=PICKED_UP`;
+  const deliveredUrl = `${baseUrl}/oneclick?token=${encodeURIComponent(token)}&type=DELIVERED`;
+  const delayUrl = `${baseUrl}/oneclick?token=${encodeURIComponent(token)}&type=DELAY`;
+
+  // QR points to oneclick pickup (fast path)
+  const qrPngBuffer = await QRCode.toBuffer(pickupUrl, { width: 460, margin: 1 });
 
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader(
@@ -237,21 +242,20 @@ app.post("/api/pdf", async (req, res) => {
   const doc = new PDFDocument({ size: "A4", margin: 44 });
   doc.pipe(res);
 
-  // --- Styles
-  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   const left = doc.page.margins.left;
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
 
   // Title
   doc.font("Helvetica-Bold").fontSize(18).text("Milestone Update", left, 56);
   doc.font("Helvetica").fontSize(11).fillColor("#555")
-    .text("Scan the QR or open the link to update milestones (no app needed).", left, 78);
+    .text("Tap a button below (PDF) → it opens a web page and submits with GPS.", left, 78);
   doc.fillColor("#000");
 
   // Divider
   doc.moveTo(left, 100).lineTo(left + pageWidth, 100).strokeColor("#DDD").stroke();
   doc.strokeColor("#000");
 
-  // Order details
+  // Details
   let y = 118;
   doc.font("Helvetica-Bold").fontSize(14).text(`Order: ${orderNumber}`, left, y);
   y += 22;
@@ -262,76 +266,67 @@ app.post("/api/pdf", async (req, res) => {
   doc.font("Helvetica").fontSize(10).fillColor("#666").text(`Link expires in ${expiresInMinutes ?? ""} minutes`, left, y);
   doc.fillColor("#000");
 
-  // Divider
   y += 18;
   doc.moveTo(left, y).lineTo(left + pageWidth, y).strokeColor("#DDD").stroke();
-  doc.strokeColor("#000");
   y += 18;
 
-  // QR (big)
-  const qrSize = 240;
-  const qrX = left;
-  const qrY = y;
-  doc.image(qrPngBuffer, qrX, qrY, { fit: [qrSize, qrSize] });
+  // QR
+  const qrSize = 220;
+  doc.image(qrPngBuffer, left, y, { fit: [qrSize, qrSize] });
 
-  // Steps (right side)
-  const stepsX = qrX + qrSize + 18;
+  // Right steps
+  const stepsX = left + qrSize + 18;
   const stepsW = left + pageWidth - stepsX;
 
-  doc.font("Helvetica-Bold").fontSize(14).text("Driver steps", stepsX, qrY);
+  doc.font("Helvetica-Bold").fontSize(14).text("Driver steps", stepsX, y);
   doc.font("Helvetica").fontSize(12);
 
   const steps = [
-    "1) Scan the QR code (camera).",
-    "2) The page opens on your phone.",
-    "3) Tap one of the buttons below.",
-    "4) Tap Submit (location will be captured automatically)."
+    "1) Tap a button in this PDF.",
+    "2) Your phone browser opens.",
+    "3) Allow location if asked.",
+    "4) Done ✅ (event sent)."
   ];
-
-  let sy = qrY + 24;
+  let sy = y + 24;
   for (const s of steps) {
     doc.text(s, stepsX, sy, { width: stepsW });
     sy += 18;
   }
 
-  // Button-like boxes below
-  y = qrY + qrSize + 24;
+  // Button-like boxes (CLICKABLE LINKS)
+  y = y + qrSize + 24;
 
-  doc.font("Helvetica-Bold").fontSize(12).text("Buttons you will see on the page:", left, y);
+  doc.font("Helvetica-Bold").fontSize(12).text("Tap buttons (they are clickable links):", left, y);
   y += 14;
 
-  function buttonBox(title, subtitle) {
-    const h = 62;
+  function linkButtonBox(title, subtitle, url) {
+    const h = 66;
+    // rectangle
     doc.roundedRect(left, y, pageWidth, h, 10).lineWidth(1).strokeColor("#D0D0D0").stroke();
+    // clickable area over the rectangle
+    doc.link(left, y, pageWidth, h, url);
+
     doc.fillColor("#000").font("Helvetica-Bold").fontSize(12).text(title, left + 14, y + 12, { width: pageWidth - 28 });
-    doc.fillColor("#666").font("Helvetica").fontSize(10).text(subtitle, left + 14, y + 30, { width: pageWidth - 28 });
+    doc.fillColor("#666").font("Helvetica").fontSize(10).text(subtitle, left + 14, y + 32, { width: pageWidth - 28 });
     doc.fillColor("#000");
+
     y += h + 10;
   }
 
-  buttonBox(`✅ Pick up from ${pickupLocation}`, "Use this when you have collected the shipment from the pickup location.");
-  buttonBox(`✅ Delivered at ${deliveryLocation}`, "Use this when the shipment is delivered at the delivery location.");
-  buttonBox("⚠️ Delay", "Use this if you are delayed. Select a reason and add notes (optional).");
+  linkButtonBox(`✅ Pick up from ${pickupLocation}`, "Tap to submit PICK UP with your current GPS.", pickupUrl);
+  linkButtonBox(`✅ Delivered at ${deliveryLocation}`, "Tap to submit DELIVERED with your current GPS.", deliveredUrl);
+  linkButtonBox("⚠️ Delay", "Tap to open delay page (select reason + submit with GPS).", delayUrl);
 
-  // Direct link
   y += 6;
   doc.moveTo(left, y).lineTo(left + pageWidth, y).strokeColor("#DDD").stroke();
   y += 14;
 
-  doc.fillColor("#000").font("Helvetica-Bold").fontSize(12).text("Direct link (if QR scan is not possible):", left, y);
+  doc.fillColor("#000").font("Helvetica-Bold").fontSize(12).text("Fallback link:", left, y);
   y += 16;
-
-  doc.font("Helvetica").fontSize(9).fillColor("#000")
-    .text(link, left, y, { width: pageWidth });
-
-  // Footer
-  doc.font("Helvetica").fontSize(10).fillColor("#666")
-    .text("Tip: This PDF can be opened on mobile. Zoom in if needed.", left, 790);
+  doc.font("Helvetica").fontSize(9).text(pickupUrl, left, y, { width: pageWidth });
 
   doc.end();
 });
-
-app.get("/api/milestones", (req, res) => res.json(readMilestones()));
 
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);

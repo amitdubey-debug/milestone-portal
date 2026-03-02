@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Milestone update</title>
+  <style>
+    body { font-family: system-ui; margin:0; background:#f6f7fb; }
+    .wrap { max-width: 720px; margin: 18px auto; padding: 16px; }
+    .card { background:#fff; border-radius:16px; padding:16px; box-shadow:0 6px 20px rgba(0,0,0,.06); }
+    h1 { margin:0 0 8px; font-size:18px; }
+    .muted { color:#667; font-size:13px; }
+    .status { margin-top:12px; font-size:14px; }
+    .ok { color:#0a6; }
+    .err { color:#c22; }
+    .btn { margin-top:14px; padding:12px 14px; border-radius:12px; border:1px solid #111; background:#111; color:#fff; font-weight:700; width:100%; }
+    select, textarea { width:100%; border-radius:12px; border:1px solid #dde; padding:10px; font-size:14px; margin-top:8px; }
+    textarea { min-height: 88px; resize: vertical; }
+    .hide { display:none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1 id="title">Updating…</h1>
+      <div class="muted" id="sub">We’ll ask for location and submit the milestone.</div>
+
+      <div id="delayBlock" class="hide">
+        <div class="muted" style="margin-top:10px;">Delay reason</div>
+        <select id="reason">
+          <option value="">Select a reason</option>
+          <option>Traffic</option>
+          <option>Vehicle breakdown</option>
+          <option>Waiting time at gate</option>
+          <option>Documentation issue</option>
+          <option>Customer not ready</option>
+          <option>Weather</option>
+          <option>Other</option>
+        </select>
+
+        <div class="muted" style="margin-top:10px;">Notes (optional)</div>
+        <textarea id="notes" placeholder="Add short details…"></textarea>
+
+        <button class="btn" id="delaySubmit">Submit delay</button>
+      </div>
+
+      <div class="status" id="status"></div>
+    </div>
+  </div>
+
+<script>
+  function qs(name) {
+    const url = new URL(window.location.href);
+    return url.searchParams.get(name);
+  }
+
+  const token = qs("token");
+  const type = qs("type"); // PICKED_UP | DELIVERED | DELAY
+
+  const title = document.getElementById("title");
+  const sub = document.getElementById("sub");
+  const statusEl = document.getElementById("status");
+  const delayBlock = document.getElementById("delayBlock");
+  const reason = document.getElementById("reason");
+  const notes = document.getElementById("notes");
+  const delaySubmit = document.getElementById("delaySubmit");
+
+  function setStatus(msg, kind) {
+    statusEl.className = "status " + (kind === "ok" ? "ok" : kind === "err" ? "err" : "");
+    statusEl.textContent = msg || "";
+  }
+
+  async function getGeo() {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) return resolve(null);
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+      );
+    });
+  }
+
+  async function submit(milestoneType, delayReason, delayNotes) {
+    try {
+      if (!token || !milestoneType) throw new Error("Invalid link.");
+
+      title.textContent = "Submitting…";
+      setStatus("Requesting location…");
+
+      const geo = await getGeo();
+
+      const payload = {
+        token,
+        milestoneType,
+        delayReason,
+        delayNotes,
+        geo
+      };
+
+      const r = await fetch("/api/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "Submit failed");
+
+      title.textContent = "Submitted ✅";
+      sub.textContent = "Thank you. You can close this page now.";
+      setStatus("Milestone submitted successfully.", "ok");
+    } catch (e) {
+      title.textContent = "Could not submit";
+      setStatus(e.message, "err");
+    }
+  }
+
+  // If delay: show form and wait
+  if (type === "DELAY") {
+    title.textContent = "Delay";
+    sub.textContent = "Select a reason and submit.";
+    delayBlock.classList.remove("hide");
+
+    delaySubmit.addEventListener("click", () => {
+      if (!reason.value) {
+        setStatus("Please select a delay reason.", "err");
+        return;
+      }
+      setStatus("");
+      submit("DELAY", reason.value, notes.value);
+    });
+  } else if (type === "PICKED_UP") {
+    title.textContent = "Pick up";
+    submit("PICKED_UP");
+  } else if (type === "DELIVERED") {
+    title.textContent = "Delivered";
+    submit("DELIVERED");
+  } else {
+    title.textContent = "Invalid link";
+    setStatus("Missing event type.", "err");
+  }
+</script>
+</body>
+</html>
