@@ -543,24 +543,23 @@ app.post("/api/pdf", async (req, res) => {
   txt(d.bondedGoods, L + 130, 704, 9, false);
 
   // Stage table (bordered) like sample
-  const stTop = 734;
-  box(L + 10, stTop, W - 20, 90);
+const stTop = 720;
+box(L + 10, stTop, W - 20, 80);
   thin(); doc.moveTo(L + 10, stTop + 22).lineTo(R - 10, stTop + 22).stroke();
 
   txt("Stage", L + 20, stTop + 6, 9, true);
   txt("From", L + 160, stTop + 6, 9, true);
   txt("To", L + 430, stTop + 6, 9, true);
 
-  txt("1", L + 24, stTop + 32, 9, true);
-  txt(d.stageFrom, L + 160, stTop + 32, 9, false, { width: 240 });
-  txt(d.stageTo, L + 430, stTop + 32, 9, false, { width: 240 });
+txt("1", L + 24, stTop + 28, 9, true);
+txt(d.stageFrom, L + 160, stTop + 28, 9, false, { width: 240 });
+txt(d.stageTo, L + 430, stTop + 28, 9, false, { width: 240 });
 
-  txt(`Appointment Arrival: ${d.appointmentFrom}`, L + 160, stTop + 64, 9, false);
-  txt(`Appointment Arrival: ${d.appointmentTo}`, L + 430, stTop + 64, 9, false);
+txt(`Appointment Arrival: ${d.appointmentFrom}`, L + 160, stTop + 56, 9, false);
+txt(`Appointment Arrival: ${d.appointmentTo}`, L + 430, stTop + 56, 9, false);
 
-  txt(`Total cost ${d.totalCost}`, L + 10, 840, 10, true);
-
-  txt("Page 1 of 2", R - 90, 840, 9, false);
+  txt(`Total cost ${d.totalCost}`, L + 10, 805, 10, true);
+txt("Page 1 of 2", R - 90, 805, 9, false);
 
   // ===================== PAGE 2 =====================
   doc.addPage();
