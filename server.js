@@ -7,6 +7,8 @@ import fs from "fs";
 import path from "path";
 import { nanoid } from "nanoid";
 import { fileURLToPath } from "url";
+import QRCode from "qrcode";
+import PDFDocument from "pdfkit";
 
 dotenv.config();
 
@@ -18,10 +20,10 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 const TOKEN_TTL_MINUTES = Number(process.env.TOKEN_TTL_MINUTES || 60 * 24 * 7);
 
 const app = express();
-app.set("trust proxy", 1); // ✅ important for Render (x-forwarded-proto/host)
+app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(morgan("dev"));
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const DATA_DIR = path.join(__dirname, "data");
@@ -45,10 +47,8 @@ function appendMilestone(record) {
 
 /**
  * SSE subscribers keyed by orderNumber
- * order -> Set<res>
  */
 const subscribers = new Map();
-
 function publish(orderNumber, event) {
   const subs = subscribers.get(orderNumber);
   if (!subs) return;
@@ -57,26 +57,18 @@ function publish(orderNumber, event) {
 }
 
 /**
- * Portal pages
+ * Pages
  */
-app.get("/generate", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "generate.html"));
-});
-
-app.get("/dashboard", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "dashboard.html"));
-});
-
-app.get("/milestone", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "milestone.html"));
-});
+app.get("/", (req, res) => res.redirect("/generate"));
+app.get("/generate", (req, res) => res.sendFile(path.join(__dirname, "public", "generate.html")));
+app.get("/dashboard", (req, res) => res.sendFile(path.join(__dirname, "public", "dashboard.html")));
+app.get("/milestone", (req, res) => res.sendFile(path.join(__dirname, "public", "milestone.html")));
 
 /**
- * MODULE 1: Generate tokenised link (derived base URL for Render)
  * POST /api/link
  * body: { orderNumber, pickupLocation, deliveryLocation, ttlMinutes }
  */
-app.post("/api/link", (req, res) => {
+app.post("/api/link", async (req, res) => {
   const { orderNumber, pickupLocation, deliveryLocation, ttlMinutes } = req.body || {};
 
   if (!orderNumber || !pickupLocation || !deliveryLocation) {
@@ -85,13 +77,10 @@ app.post("/api/link", (req, res) => {
     });
   }
 
-  // Allow per-link TTL; default to env; cap at 30 days
   const requested = Number(ttlMinutes);
   const maxMinutes = 60 * 24 * 30; // 30 days
   const effectiveTtl =
-    Number.isFinite(requested) && requested > 0
-      ? Math.min(requested, maxMinutes)
-      : TOKEN_TTL_MINUTES;
+    Number.isFinite(requested) && requested > 0 ? Math.min(requested, maxMinutes) : TOKEN_TTL_MINUTES;
 
   const payload = {
     orderNumber: String(orderNumber),
@@ -105,7 +94,6 @@ app.post("/api/link", (req, res) => {
     jwtid: nanoid(16)
   });
 
-  // ✅ derive base URL from request (works on Render)
   const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
   const host = req.headers["x-forwarded-host"] || req.headers.host;
   const baseUrl = `${proto}://${host}`;
@@ -113,11 +101,14 @@ app.post("/api/link", (req, res) => {
   const link = `${baseUrl}/milestone?token=${encodeURIComponent(token)}`;
   const dashboard = `${baseUrl}/dashboard?order=${encodeURIComponent(orderNumber)}`;
 
-  res.json({ link, dashboard, token, expiresInMinutes: effectiveTtl });
+  // ✅ server-side QR (no CDN)
+  const qrPngBuffer = await QRCode.toBuffer(link, { width: 340, margin: 1 });
+  const qrDataUrl = `data:image/png;base64,${qrPngBuffer.toString("base64")}`;
+
+  res.json({ link, dashboard, token, expiresInMinutes: effectiveTtl, qrDataUrl });
 });
 
 /**
- * Get context for token (frontend uses this to label buttons)
  * GET /api/context?token=...
  */
 app.get("/api/context", (req, res) => {
@@ -150,13 +141,11 @@ app.get("/api/stream", (req, res) => {
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders?.();
 
-  // keep alive ping
   const keepAlive = setInterval(() => res.write(":\n\n"), 25000);
 
   if (!subscribers.has(order)) subscribers.set(order, new Set());
   subscribers.get(order).add(res);
 
-  // bootstrap old events for this order
   const all = readMilestones().filter((m) => m.orderNumber === order);
   res.write(`event: bootstrap\ndata: ${JSON.stringify(all)}\n\n`);
 
@@ -171,7 +160,6 @@ app.get("/api/stream", (req, res) => {
 });
 
 /**
- * Submit milestone
  * POST /api/submit
  * body: { token, milestoneType, delayReason?, delayNotes?, geo? }
  */
@@ -226,13 +214,125 @@ app.post("/api/submit", (req, res) => {
 });
 
 /**
- * Debug endpoint: get all milestones
+ * POST /api/pdf
+ * body: { orderNumber, pickupLocation, deliveryLocation, expiresInMinutes, link }
+ * returns application/pdf
  */
-app.get("/api/milestones", (req, res) => {
-  res.json(readMilestones());
+app.post("/api/pdf", async (req, res) => {
+  const { orderNumber, pickupLocation, deliveryLocation, expiresInMinutes, link } = req.body || {};
+
+  if (!orderNumber || !pickupLocation || !deliveryLocation || !link) {
+    return res.status(400).json({ error: "Missing required fields for PDF" });
+  }
+
+  // Generate QR again server-side
+  const qrPngBuffer = await QRCode.toBuffer(link, { width: 460, margin: 1 });
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="milestone-qr-${String(orderNumber).replace(/[^a-zA-Z0-9_-]/g, "")}.pdf"`
+  );
+
+  const doc = new PDFDocument({ size: "A4", margin: 44 });
+  doc.pipe(res);
+
+  // --- Styles
+  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const left = doc.page.margins.left;
+
+  // Title
+  doc.font("Helvetica-Bold").fontSize(18).text("Milestone Update", left, 56);
+  doc.font("Helvetica").fontSize(11).fillColor("#555")
+    .text("Scan the QR or open the link to update milestones (no app needed).", left, 78);
+  doc.fillColor("#000");
+
+  // Divider
+  doc.moveTo(left, 100).lineTo(left + pageWidth, 100).strokeColor("#DDD").stroke();
+  doc.strokeColor("#000");
+
+  // Order details
+  let y = 118;
+  doc.font("Helvetica-Bold").fontSize(14).text(`Order: ${orderNumber}`, left, y);
+  y += 22;
+  doc.font("Helvetica").fontSize(12).text(`Pick up: ${pickupLocation}`, left, y);
+  y += 18;
+  doc.text(`Delivery: ${deliveryLocation}`, left, y);
+  y += 18;
+  doc.font("Helvetica").fontSize(10).fillColor("#666").text(`Link expires in ${expiresInMinutes ?? ""} minutes`, left, y);
+  doc.fillColor("#000");
+
+  // Divider
+  y += 18;
+  doc.moveTo(left, y).lineTo(left + pageWidth, y).strokeColor("#DDD").stroke();
+  doc.strokeColor("#000");
+  y += 18;
+
+  // QR (big)
+  const qrSize = 240;
+  const qrX = left;
+  const qrY = y;
+  doc.image(qrPngBuffer, qrX, qrY, { fit: [qrSize, qrSize] });
+
+  // Steps (right side)
+  const stepsX = qrX + qrSize + 18;
+  const stepsW = left + pageWidth - stepsX;
+
+  doc.font("Helvetica-Bold").fontSize(14).text("Driver steps", stepsX, qrY);
+  doc.font("Helvetica").fontSize(12);
+
+  const steps = [
+    "1) Scan the QR code (camera).",
+    "2) The page opens on your phone.",
+    "3) Tap one of the buttons below.",
+    "4) Tap Submit (location will be captured automatically)."
+  ];
+
+  let sy = qrY + 24;
+  for (const s of steps) {
+    doc.text(s, stepsX, sy, { width: stepsW });
+    sy += 18;
+  }
+
+  // Button-like boxes below
+  y = qrY + qrSize + 24;
+
+  doc.font("Helvetica-Bold").fontSize(12).text("Buttons you will see on the page:", left, y);
+  y += 14;
+
+  function buttonBox(title, subtitle) {
+    const h = 62;
+    doc.roundedRect(left, y, pageWidth, h, 10).lineWidth(1).strokeColor("#D0D0D0").stroke();
+    doc.fillColor("#000").font("Helvetica-Bold").fontSize(12).text(title, left + 14, y + 12, { width: pageWidth - 28 });
+    doc.fillColor("#666").font("Helvetica").fontSize(10).text(subtitle, left + 14, y + 30, { width: pageWidth - 28 });
+    doc.fillColor("#000");
+    y += h + 10;
+  }
+
+  buttonBox(`✅ Pick up from ${pickupLocation}`, "Use this when you have collected the shipment from the pickup location.");
+  buttonBox(`✅ Delivered at ${deliveryLocation}`, "Use this when the shipment is delivered at the delivery location.");
+  buttonBox("⚠️ Delay", "Use this if you are delayed. Select a reason and add notes (optional).");
+
+  // Direct link
+  y += 6;
+  doc.moveTo(left, y).lineTo(left + pageWidth, y).strokeColor("#DDD").stroke();
+  y += 14;
+
+  doc.fillColor("#000").font("Helvetica-Bold").fontSize(12).text("Direct link (if QR scan is not possible):", left, y);
+  y += 16;
+
+  doc.font("Helvetica").fontSize(9).fillColor("#000")
+    .text(link, left, y, { width: pageWidth });
+
+  // Footer
+  doc.font("Helvetica").fontSize(10).fillColor("#666")
+    .text("Tip: This PDF can be opened on mobile. Zoom in if needed.", left, 790);
+
+  doc.end();
 });
+
+app.get("/api/milestones", (req, res) => res.json(readMilestones()));
 
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`Portal: http://localhost:${PORT}/generate`);
 });
