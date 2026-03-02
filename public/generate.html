@@ -14,6 +14,7 @@
     input{width:100%;padding:10px;border:1px solid #dde;border-radius:12px;font-size:14px}
     button{margin-top:12px;padding:12px 14px;border-radius:12px;border:1px solid #111;background:#111;color:#fff;font-weight:700;cursor:pointer}
     button.secondary{background:#fff;color:#111;border:1px solid #ccd}
+    button.small{padding:8px 10px;border-radius:10px;margin-top:0}
     .out{margin-top:12px;padding:12px;border:1px dashed #ccd;border-radius:12px;background:#fafbff}
     a{word-break:break-all}
     .muted{color:#667;font-size:13px}
@@ -21,6 +22,8 @@
     .qrWrap{display:none;margin-top:12px}
     .qrBox{background:#fff;border:1px solid #dde;border-radius:14px;padding:12px;display:inline-block}
     .qrBox img{width:220px;height:220px;display:block}
+    .copyRow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
   </style>
 </head>
 <body>
@@ -61,7 +64,7 @@
       <div class="out" id="out" style="display:none;"></div>
 
       <div class="qrWrap" id="qrWrap">
-        <div class="muted" style="margin-bottom:6px;">Scan QR to open the milestone page</div>
+        <div class="muted" style="margin-bottom:6px;">Scan QR to open the driver landing page (all updates)</div>
         <div class="qrBox">
           <img id="qrImg" alt="QR code" />
         </div>

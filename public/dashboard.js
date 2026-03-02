@@ -6,7 +6,9 @@ function qs(name) {
 const order = qs("order");
 const orderPill = document.getElementById("orderPill");
 const statusEl = document.getElementById("status");
-const logEl = document.getElementById("log");
+const summaryEl = document.getElementById("summary");
+const rowsEl = document.getElementById("rows");
+const refreshBtn = document.getElementById("refreshBtn");
 
 if (!order) {
   statusEl.textContent = "Missing ?order=";
@@ -14,7 +16,6 @@ if (!order) {
 }
 orderPill.textContent = `Order: ${order}`;
 
-// Leaflet map
 const map = L.map("map");
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19,
@@ -22,17 +23,11 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
 }).addTo(map);
 
 const layers = {
-  pickup: null,
-  delivery: null,
-  pings: L.layerGroup().addTo(map),
-  route: null
+  points: L.layerGroup().addTo(map),
+  trail: null
 };
 
-function addLog(line) {
-  const div = document.createElement("div");
-  div.textContent = line;
-  logEl.prepend(div);
-}
+const trailPts = [];
 
 function safeLatLng(obj) {
   if (!obj) return null;
@@ -42,22 +37,105 @@ function safeLatLng(obj) {
   return [lat, lon];
 }
 
-// Bootstrap existing events + infer coords from earliest pings (optional)
-let pickupCoord = null;
-let deliveryCoord = null;
-
-function redrawRoute() {
-  if (layers.route) {
-    map.removeLayer(layers.route);
-    layers.route = null;
+function clearUI() {
+  rowsEl.innerHTML = "";
+  layers.points.clearLayers();
+  trailPts.length = 0;
+  if (layers.trail) {
+    map.removeLayer(layers.trail);
+    layers.trail = null;
   }
-  const pts = [];
-  if (pickupCoord) pts.push(pickupCoord);
-  if (deliveryCoord) pts.push(deliveryCoord);
-  if (pts.length >= 2) layers.route = L.polyline(pts).addTo(map);
 }
 
-// Connect SSE
+function redrawTrail() {
+  if (layers.trail) {
+    map.removeLayer(layers.trail);
+    layers.trail = null;
+  }
+  if (trailPts.length >= 2) {
+    layers.trail = L.polyline(trailPts).addTo(map);
+  }
+}
+
+function addRow(e) {
+  const tr = document.createElement("tr");
+
+  const tdTime = document.createElement("td");
+  tdTime.className = "mono";
+  tdTime.textContent = e.receivedAtUtc || "";
+
+  const tdType = document.createElement("td");
+  tdType.textContent = e.milestoneType || "";
+
+  const tdDet = document.createElement("td");
+  const parts = [];
+  if (e.delayReason) parts.push(`Reason: ${e.delayReason}`);
+  if (e.delayNotes) parts.push(`Notes: ${e.delayNotes}`);
+  tdDet.textContent = parts.join(" • ") || "";
+
+  const tdGeo = document.createElement("td");
+  if (e.geo?.lat && e.geo?.lon) {
+    tdGeo.className = "mono";
+    tdGeo.textContent = `${Number(e.geo.lat).toFixed(5)}, ${Number(e.geo.lon).toFixed(5)}${e.geo.accuracy ? ` (±${Math.round(e.geo.accuracy)}m)` : ""}`;
+  } else {
+    tdGeo.textContent = "";
+  }
+
+  tr.appendChild(tdTime);
+  tr.appendChild(tdType);
+  tr.appendChild(tdDet);
+  tr.appendChild(tdGeo);
+  rowsEl.appendChild(tr);
+}
+
+function addMapPoint(e) {
+  const pt = safeLatLng(e.geo);
+  if (!pt) return;
+
+  trailPts.push(pt);
+  redrawTrail();
+
+  const label = `${e.milestoneType} @ ${e.receivedAtUtc}${e.delayReason ? " (" + e.delayReason + ")" : ""}`;
+  const radius = e.milestoneType === "GPS_PING" ? 4 : 7;
+
+  L.circleMarker(pt, { radius }).addTo(layers.points).bindPopup(label);
+
+  map.setView(pt, Math.max(map.getZoom(), 11));
+}
+
+function renderAll(all) {
+  clearUI();
+
+  all.sort((a, b) => String(a.receivedAtUtc).localeCompare(String(b.receivedAtUtc)));
+
+  for (const e of all) {
+    addRow(e);
+    const pt = safeLatLng(e.geo);
+    if (pt) {
+      // draw markers for everything with geo
+      addMapPoint(e);
+    }
+  }
+
+  summaryEl.textContent = `Loaded ${all.length} events`;
+  const lastWithGeo = [...all].reverse().find(x => x.geo?.lat && x.geo?.lon);
+  if (lastWithGeo) map.setView([lastWithGeo.geo.lat, lastWithGeo.geo.lon], 10);
+  else map.setView([20, 0], 2);
+}
+
+// Refresh button reads JSON from server without redeploy
+refreshBtn.addEventListener("click", async () => {
+  summaryEl.textContent = "Refreshing…";
+  try {
+    const r = await fetch(`/api/milestones?order=${encodeURIComponent(order)}`);
+    const all = await r.json();
+    renderAll(all);
+  } catch {
+    summaryEl.textContent = "Refresh failed";
+  }
+});
+
+// SSE live stream
 const es = new EventSource(`/api/stream?order=${encodeURIComponent(order)}`);
 
 es.addEventListener("open", () => {
@@ -70,36 +148,15 @@ es.addEventListener("error", () => {
 
 es.addEventListener("bootstrap", (evt) => {
   const all = JSON.parse(evt.data || "[]");
-
-  // show existing pings
-  for (const e of all) {
-    if (e.geo?.lat && e.geo?.lon) {
-      const pt = [e.geo.lat, e.geo.lon];
-      L.circleMarker(pt, { radius: 6 }).addTo(layers.pings)
-        .bindPopup(`${e.milestoneType} @ ${e.receivedAtUtc}`);
-    }
-  }
-
-  // center map on last ping if exists else world-ish
-  const lastWithGeo = [...all].reverse().find(x => x.geo?.lat && x.geo?.lon);
-  if (lastWithGeo) map.setView([lastWithGeo.geo.lat, lastWithGeo.geo.lon], 10);
-  else map.setView([20, 0], 2);
-
-  addLog(`Loaded ${all.length} existing events`);
+  renderAll(all);
 });
 
-// Normal events: default "message"
 es.onmessage = (evt) => {
   const e = JSON.parse(evt.data);
+  // append new event live
+  addRow(e);
+  addMapPoint(e);
 
-  addLog(`${e.receivedAtUtc} — ${e.milestoneType}${e.delayReason ? " (" + e.delayReason + ")" : ""}`);
-
-  // plot ping if geo present
-  const pt = safeLatLng(e.geo);
-  if (pt) {
-    L.circleMarker(pt, { radius: 7 }).addTo(layers.pings)
-      .bindPopup(`${e.milestoneType} @ ${e.receivedAtUtc}`)
-      .openPopup();
-    map.setView(pt, Math.max(map.getZoom(), 11));
-  }
+  const count = rowsEl.children.length;
+  summaryEl.textContent = `Loaded ${count} events`;
 };

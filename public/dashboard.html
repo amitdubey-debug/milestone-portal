@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Live Milestone Dashboard</title>
 
-  <!-- Leaflet (CDN) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
@@ -17,8 +16,14 @@
     h1{margin:0 0 10px;font-size:18px}
     .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
     .muted{color:#667;font-size:13px}
-    .log{margin-top:10px;font-size:13px;max-height:160px;overflow:auto;background:#fafbff;border:1px solid #dde;border-radius:12px;padding:10px}
     .pill{display:inline-block;background:#eef2ff;border-radius:999px;padding:6px 10px;font-size:12px}
+    .log{margin-top:10px;font-size:13px;background:#fafbff;border:1px solid #dde;border-radius:12px;padding:10px}
+    .logHeader{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+    .btn{padding:8px 10px;border-radius:10px;border:1px solid #ccd;background:#fff;cursor:pointer;font-weight:700}
+    .table{width:100%;border-collapse:collapse}
+    .table th,.table td{padding:8px 6px;border-top:1px solid #e8eaf2;vertical-align:top}
+    .table th{color:#556;font-size:12px;text-align:left}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
   </style>
 </head>
 <body>
@@ -31,7 +36,25 @@
       </div>
 
       <div id="map"></div>
-      <div class="log" id="log"></div>
+
+      <div class="log">
+        <div class="logHeader">
+          <div class="muted" id="summary">Loading…</div>
+          <button class="btn" id="refreshBtn">Refresh</button>
+        </div>
+
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="width:190px;">Time (UTC)</th>
+              <th style="width:120px;">Type</th>
+              <th>Details</th>
+              <th style="width:220px;">Geo</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 

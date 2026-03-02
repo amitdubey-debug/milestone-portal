@@ -26,11 +26,14 @@ app.use(morgan("dev"));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
+// ---------- Demo storage ----------
 const DATA_DIR = path.join(__dirname, "data");
 const MILESTONES_FILE = path.join(DATA_DIR, "milestones.json");
+const SHORTLINKS_FILE = path.join(DATA_DIR, "shortlinks.json");
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
 if (!fs.existsSync(MILESTONES_FILE)) fs.writeFileSync(MILESTONES_FILE, JSON.stringify([], null, 2));
+if (!fs.existsSync(SHORTLINKS_FILE)) fs.writeFileSync(SHORTLINKS_FILE, JSON.stringify({}, null, 2));
 
 function readMilestones() {
   try {
@@ -39,15 +42,40 @@ function readMilestones() {
     return [];
   }
 }
+function writeMilestones(all) {
+  fs.writeFileSync(MILESTONES_FILE, JSON.stringify(all, null, 2));
+}
 function appendMilestone(record) {
   const all = readMilestones();
   all.push(record);
-  fs.writeFileSync(MILESTONES_FILE, JSON.stringify(all, null, 2));
+  writeMilestones(all);
 }
 
-/**
- * SSE subscribers keyed by orderNumber
- */
+function readShortlinks() {
+  try {
+    return JSON.parse(fs.readFileSync(SHORTLINKS_FILE, "utf8"));
+  } catch {
+    return {};
+  }
+}
+function writeShortlinks(obj) {
+  fs.writeFileSync(SHORTLINKS_FILE, JSON.stringify(obj, null, 2));
+}
+function createShortCode(token) {
+  const map = readShortlinks();
+  const code = nanoid(8);
+  map[code] = { token, createdAtUtc: new Date().toISOString() };
+  writeShortlinks(map);
+  return code;
+}
+
+function baseUrlFromReq(req) {
+  const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  return `${proto}://${host}`;
+}
+
+// ---------- SSE ----------
 const subscribers = new Map();
 function publish(orderNumber, event) {
   const subs = subscribers.get(orderNumber);
@@ -56,25 +84,41 @@ function publish(orderNumber, event) {
   for (const res of subs) res.write(data);
 }
 
-/**
- * Pages
- */
+// ---------- Pages ----------
 app.get("/", (req, res) => res.redirect("/generate"));
 app.get("/generate", (req, res) => res.sendFile(path.join(__dirname, "public", "generate.html")));
 app.get("/dashboard", (req, res) => res.sendFile(path.join(__dirname, "public", "dashboard.html")));
 app.get("/milestone", (req, res) => res.sendFile(path.join(__dirname, "public", "milestone.html")));
 app.get("/oneclick", (req, res) => res.sendFile(path.join(__dirname, "public", "oneclick.html")));
 
+// ---------- Short links ----------
+// /s/<code> -> /oneclick?token=...&type=...
+app.get("/s/:code", (req, res) => {
+  const code = String(req.params.code || "");
+  const map = readShortlinks();
+  const entry = map[code];
+  if (!entry?.token) return res.status(404).send("Invalid short link");
+
+  const url = new URL(`${baseUrlFromReq(req)}/oneclick`);
+  url.searchParams.set("token", entry.token);
+
+  // optional: type = PICKED_UP / DELIVERED / DELAY
+  if (req.query.type) url.searchParams.set("type", String(req.query.type));
+
+  res.redirect(url.toString());
+});
+
+// ---------- API ----------
+
 /**
  * POST /api/link
+ * body: { orderNumber, pickupLocation, deliveryLocation, ttlMinutes }
+ * returns: { token, link, shortLanding, qrDataUrl, dashboard, expiresInMinutes }
  */
 app.post("/api/link", async (req, res) => {
   const { orderNumber, pickupLocation, deliveryLocation, ttlMinutes } = req.body || {};
-
   if (!orderNumber || !pickupLocation || !deliveryLocation) {
-    return res.status(400).json({
-      error: "Missing required fields: orderNumber, pickupLocation, deliveryLocation"
-    });
+    return res.status(400).json({ error: "Missing required fields: orderNumber, pickupLocation, deliveryLocation" });
   }
 
   const requested = Number(ttlMinutes);
@@ -94,23 +138,27 @@ app.post("/api/link", async (req, res) => {
     jwtid: nanoid(16)
   });
 
-  const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
-  const host = req.headers["x-forwarded-host"] || req.headers.host;
-  const baseUrl = `${proto}://${host}`;
+  const baseUrl = baseUrlFromReq(req);
 
+  // Full milestone page (still available)
   const link = `${baseUrl}/milestone?token=${encodeURIComponent(token)}`;
+
+  // Short landing link (NO type) => shows all options
+  const landingCode = createShortCode(token);
+  const shortLanding = `${baseUrl}/s/${landingCode}`;
+
+  // Dashboard
   const dashboard = `${baseUrl}/dashboard?order=${encodeURIComponent(orderNumber)}`;
 
-  // QR points to oneclick page by default (faster for drivers)
-  const oneclickDefault = `${baseUrl}/oneclick?token=${encodeURIComponent(token)}&type=PICKED_UP`;
-  const qrPngBuffer = await QRCode.toBuffer(oneclickDefault, { width: 340, margin: 1 });
+  // QR points to landing (all updates)
+  const qrPngBuffer = await QRCode.toBuffer(shortLanding, { width: 360, margin: 1 });
   const qrDataUrl = `data:image/png;base64,${qrPngBuffer.toString("base64")}`;
 
-  res.json({ link, dashboard, token, expiresInMinutes: effectiveTtl, qrDataUrl });
+  res.json({ token, link, shortLanding, qrDataUrl, dashboard, expiresInMinutes: effectiveTtl });
 });
 
 /**
- * Token context
+ * GET /api/context?token=...
  */
 app.get("/api/context", (req, res) => {
   const token = req.query.token;
@@ -130,7 +178,19 @@ app.get("/api/context", (req, res) => {
 });
 
 /**
- * SSE stream
+ * GET /api/milestones?order=...
+ * Used by dashboard refresh (reads JSON fresh)
+ */
+app.get("/api/milestones", (req, res) => {
+  const order = String(req.query.order || "");
+  const all = readMilestones();
+  if (!order) return res.json(all);
+  res.json(all.filter((m) => m.orderNumber === order));
+});
+
+/**
+ * SSE: GET /api/stream?order=...
+ * Sends bootstrap list immediately + then live events.
  */
 app.get("/api/stream", (req, res) => {
   const order = String(req.query.order || "");
@@ -146,6 +206,7 @@ app.get("/api/stream", (req, res) => {
   if (!subscribers.has(order)) subscribers.set(order, new Set());
   subscribers.get(order).add(res);
 
+  // IMPORTANT: read JSON fresh on every connection
   const all = readMilestones().filter((m) => m.orderNumber === order);
   res.write(`event: bootstrap\ndata: ${JSON.stringify(all)}\n\n`);
 
@@ -160,14 +221,12 @@ app.get("/api/stream", (req, res) => {
 });
 
 /**
- * Submit milestone
+ * POST /api/submit
+ * body: { token, milestoneType, delayReason?, delayNotes?, geo? }
  */
 app.post("/api/submit", (req, res) => {
   const { token, milestoneType, delayReason, delayNotes, geo } = req.body || {};
-
-  if (!token || !milestoneType) {
-    return res.status(400).json({ error: "token and milestoneType are required" });
-  }
+  if (!token || !milestoneType) return res.status(400).json({ error: "token and milestoneType are required" });
 
   let decoded;
   try {
@@ -188,11 +247,7 @@ app.post("/api/submit", (req, res) => {
   if (geo && typeof geo === "object") {
     const { lat, lon, accuracy } = geo;
     if (Number.isFinite(lat) && Number.isFinite(lon)) {
-      cleanGeo = {
-        lat,
-        lon,
-        accuracy: Number.isFinite(accuracy) ? accuracy : null
-      };
+      cleanGeo = { lat, lon, accuracy: Number.isFinite(accuracy) ? accuracy : null };
     }
   }
 
@@ -208,30 +263,71 @@ app.post("/api/submit", (req, res) => {
 
   appendMilestone(record);
   publish(decoded.orderNumber, record);
-
   res.json({ ok: true, record });
 });
 
 /**
- * PDF with clickable "buttons" (they are links to /oneclick)
+ * POST /api/ping
+ * body: { token, geo }
+ * For 10-min pings + ping-on-resume
+ */
+app.post("/api/ping", (req, res) => {
+  const { token, geo } = req.body || {};
+  if (!token) return res.status(400).json({ error: "token is required" });
+
+  let decoded;
+  try {
+    decoded = jwt.verify(token, JWT_SECRET);
+  } catch {
+    return res.status(401).json({ error: "Invalid/expired token" });
+  }
+
+  let cleanGeo = null;
+  if (geo && typeof geo === "object") {
+    const { lat, lon, accuracy } = geo;
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      cleanGeo = { lat, lon, accuracy: Number.isFinite(accuracy) ? accuracy : null };
+    }
+  }
+  if (!cleanGeo) return res.status(400).json({ error: "geo is required" });
+
+  const record = {
+    id: nanoid(12),
+    receivedAtUtc: new Date().toISOString(),
+    orderNumber: decoded.orderNumber,
+    milestoneType: "GPS_PING",
+    geo: cleanGeo
+  };
+
+  appendMilestone(record);
+  publish(decoded.orderNumber, record);
+  res.json({ ok: true });
+});
+
+/**
+ * POST /api/pdf
+ * body: { orderNumber, pickupLocation, deliveryLocation, expiresInMinutes, token }
+ * Generates a PDF with:
+ * - QR to landing (all updates)
+ * - Clickable “buttons” (clean font, no emojis)
+ * - Short fallback link (fully clickable + copyable)
  */
 app.post("/api/pdf", async (req, res) => {
   const { orderNumber, pickupLocation, deliveryLocation, expiresInMinutes, token } = req.body || {};
-
   if (!orderNumber || !pickupLocation || !deliveryLocation || !token) {
     return res.status(400).json({ error: "Missing required fields for PDF" });
   }
 
-  const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
-  const host = req.headers["x-forwarded-host"] || req.headers.host;
-  const baseUrl = `${proto}://${host}`;
+  const baseUrl = baseUrlFromReq(req);
 
-  const pickupUrl = `${baseUrl}/oneclick?token=${encodeURIComponent(token)}&type=PICKED_UP`;
-  const deliveredUrl = `${baseUrl}/oneclick?token=${encodeURIComponent(token)}&type=DELIVERED`;
-  const delayUrl = `${baseUrl}/oneclick?token=${encodeURIComponent(token)}&type=DELAY`;
+  // short links (small and easy to click/copy)
+  const landingUrl = `${baseUrl}/s/${createShortCode(token)}`;
+  const pickupUrl = `${baseUrl}/s/${createShortCode(token)}?type=PICKED_UP`;
+  const deliveredUrl = `${baseUrl}/s/${createShortCode(token)}?type=DELIVERED`;
+  const delayUrl = `${baseUrl}/s/${createShortCode(token)}?type=DELAY`;
 
-  // QR points to oneclick pickup (fast path)
-  const qrPngBuffer = await QRCode.toBuffer(pickupUrl, { width: 460, margin: 1 });
+  // QR opens landing (all updates)
+  const qrPngBuffer = await QRCode.toBuffer(landingUrl, { width: 460, margin: 1 });
 
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader(
@@ -243,17 +339,15 @@ app.post("/api/pdf", async (req, res) => {
   doc.pipe(res);
 
   const left = doc.page.margins.left;
-  const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
 
-  // Title
-  doc.font("Helvetica-Bold").fontSize(18).text("Milestone Update", left, 56);
+  // Header
+  doc.font("Helvetica-Bold").fontSize(18).fillColor("#000").text("Milestone Update", left, 56);
   doc.font("Helvetica").fontSize(11).fillColor("#555")
-    .text("Tap a button below (PDF) → it opens a web page and submits with GPS.", left, 78);
+    .text("Tap a button (PDF link) → browser opens → allow location → event sent.", left, 78);
   doc.fillColor("#000");
 
-  // Divider
-  doc.moveTo(left, 100).lineTo(left + pageWidth, 100).strokeColor("#DDD").stroke();
-  doc.strokeColor("#000");
+  doc.moveTo(left, 100).lineTo(left + width, 100).strokeColor("#DDD").stroke();
 
   // Details
   let y = 118;
@@ -267,67 +361,59 @@ app.post("/api/pdf", async (req, res) => {
   doc.fillColor("#000");
 
   y += 18;
-  doc.moveTo(left, y).lineTo(left + pageWidth, y).strokeColor("#DDD").stroke();
+  doc.moveTo(left, y).lineTo(left + width, y).strokeColor("#DDD").stroke();
   y += 18;
 
   // QR
   const qrSize = 220;
   doc.image(qrPngBuffer, left, y, { fit: [qrSize, qrSize] });
 
-  // Right steps
+  // Steps
   const stepsX = left + qrSize + 18;
-  const stepsW = left + pageWidth - stepsX;
-
+  const stepsW = left + width - stepsX;
   doc.font("Helvetica-Bold").fontSize(14).text("Driver steps", stepsX, y);
-  doc.font("Helvetica").fontSize(12);
+  doc.font("Helvetica").fontSize(12).fillColor("#000");
 
-  const steps = [
-    "1) Tap a button in this PDF.",
-    "2) Your phone browser opens.",
-    "3) Allow location if asked.",
-    "4) Done ✅ (event sent)."
-  ];
+  const steps = ["1) Scan QR or tap a PDF button.", "2) Browser opens on phone.", "3) Allow location.", "4) Done."];
   let sy = y + 24;
   for (const s of steps) {
     doc.text(s, stepsX, sy, { width: stepsW });
     sy += 18;
   }
 
-  // Button-like boxes (CLICKABLE LINKS)
+  // Buttons (clickable rectangles)
   y = y + qrSize + 24;
-
-  doc.font("Helvetica-Bold").fontSize(12).text("Tap buttons (they are clickable links):", left, y);
+  doc.font("Helvetica-Bold").fontSize(12).text("Tap buttons (clickable links):", left, y);
   y += 14;
 
-  function linkButtonBox(title, subtitle, url) {
+  function linkBox(title, subtitle, url) {
     const h = 66;
-    // rectangle
-    doc.roundedRect(left, y, pageWidth, h, 10).lineWidth(1).strokeColor("#D0D0D0").stroke();
-    // clickable area over the rectangle
-    doc.link(left, y, pageWidth, h, url);
+    doc.roundedRect(left, y, width, h, 10).lineWidth(1).strokeColor("#D0D0D0").stroke();
+    doc.link(left, y, width, h, url);
 
-    doc.fillColor("#000").font("Helvetica-Bold").fontSize(12).text(title, left + 14, y + 12, { width: pageWidth - 28 });
-    doc.fillColor("#666").font("Helvetica").fontSize(10).text(subtitle, left + 14, y + 32, { width: pageWidth - 28 });
+    doc.fillColor("#000").font("Helvetica-Bold").fontSize(12).text(title, left + 14, y + 12, { width: width - 28 });
+    doc.fillColor("#666").font("Helvetica").fontSize(10).text(subtitle, left + 14, y + 32, { width: width - 28 });
     doc.fillColor("#000");
 
     y += h + 10;
   }
 
-  linkButtonBox(`✅ Pick up from ${pickupLocation}`, "Tap to submit PICK UP with your current GPS.", pickupUrl);
-  linkButtonBox(`✅ Delivered at ${deliveryLocation}`, "Tap to submit DELIVERED with your current GPS.", deliveredUrl);
-  linkButtonBox("⚠️ Delay", "Tap to open delay page (select reason + submit with GPS).", delayUrl);
+  linkBox(`[PICK UP]  ${pickupLocation}`, "Submit PICKED_UP with current GPS.", pickupUrl);
+  linkBox(`[DELIVERED]  ${deliveryLocation}`, "Submit DELIVERED with current GPS.", deliveredUrl);
+  linkBox(`[DELAY]`, "Open delay page (choose reason + submit with GPS).", delayUrl);
 
+  // Fallback short link (short + fully clickable + copyable)
   y += 6;
-  doc.moveTo(left, y).lineTo(left + pageWidth, y).strokeColor("#DDD").stroke();
+  doc.moveTo(left, y).lineTo(left + width, y).strokeColor("#DDD").stroke();
   y += 14;
 
-  doc.fillColor("#000").font("Helvetica-Bold").fontSize(12).text("Fallback link:", left, y);
+  doc.font("Helvetica-Bold").fontSize(12).fillColor("#000").text("Fallback link (short):", left, y);
   y += 16;
-  doc.font("Helvetica").fontSize(9).text(pickupUrl, left, y, { width: pageWidth });
+
+  doc.font("Helvetica").fontSize(11).fillColor("#000").text(landingUrl, left, y, { width });
+  doc.link(left, y - 2, width, 16, landingUrl);
 
   doc.end();
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));

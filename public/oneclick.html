@@ -3,30 +3,88 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Milestone update</title>
+  <title>Milestone Update</title>
   <style>
-    body { font-family: system-ui; margin:0; background:#f6f7fb; }
-    .wrap { max-width: 720px; margin: 18px auto; padding: 16px; }
-    .card { background:#fff; border-radius:16px; padding:16px; box-shadow:0 6px 20px rgba(0,0,0,.06); }
-    h1 { margin:0 0 8px; font-size:18px; }
-    .muted { color:#667; font-size:13px; }
-    .status { margin-top:12px; font-size:14px; }
+    body { font-family: system-ui; margin:0; background:#f4f6fb; }
+    .wrap { max-width: 760px; margin: 18px auto; padding: 16px; }
+    .card { background:#fff; border-radius:18px; padding:16px; box-shadow:0 6px 20px rgba(0,0,0,.06); }
+    .hdr { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
+    h1 { margin:0; font-size:18px; }
+    .pill { background:#eef2ff; padding:6px 10px; border-radius:999px; font-size:12px; color:#334; }
+    .muted { color:#667; font-size:13px; margin-top:6px; }
+    .btnGrid { margin-top:14px; display:grid; grid-template-columns:1fr; gap:12px; }
+    .btn {
+      display:flex; align-items:center; gap:12px;
+      width:100%; padding:14px 14px; border-radius:16px;
+      border:1px solid #dde; background:#fff; cursor:pointer;
+      font-weight:800; font-size:16px;
+    }
+    .btn:active { transform: scale(0.99); }
+    .icon {
+      width:46px; height:46px; border-radius:14px;
+      display:flex; align-items:center; justify-content:center;
+      background:#f6f7ff; font-size:22px;
+      border:1px solid #e6e8ff;
+      flex: 0 0 auto;
+    }
+    .btn small { display:block; font-weight:650; color:#667; margin-top:2px; font-size:12px; }
+    .primary { border-color:#111; background:#111; color:#fff; }
+    .primary .icon { background:#222; border-color:#333; }
+    .delay { border-color:#ffdc9a; background:#fffaf0; }
+    .delay .icon { background:#fff1d6; border-color:#ffe2b0; }
+    .status { margin-top:12px; font-size:14px; padding:10px 12px; border-radius:12px; background:#f6f7fb; border:1px dashed #dde; }
     .ok { color:#0a6; }
     .err { color:#c22; }
-    .btn { margin-top:14px; padding:12px 14px; border-radius:12px; border:1px solid #111; background:#111; color:#fff; font-weight:700; width:100%; }
-    select, textarea { width:100%; border-radius:12px; border:1px solid #dde; padding:10px; font-size:14px; margin-top:8px; }
-    textarea { min-height: 88px; resize: vertical; }
+    select, textarea {
+      width:100%; border-radius:12px; border:1px solid #dde;
+      padding:10px; font-size:14px; margin-top:8px;
+    }
+    textarea { min-height: 92px; resize: vertical; }
     .hide { display:none; }
+    .note { margin-top:10px; font-size:12px; color:#556; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
-      <h1 id="title">Updating…</h1>
-      <div class="muted" id="sub">We’ll ask for location and submit the milestone.</div>
+      <div class="hdr">
+        <div>
+          <h1>Milestone Update</h1>
+          <div class="muted" id="sub">Choose an update. We will capture GPS and submit.</div>
+        </div>
+        <div class="pill" id="orderPill">Order: —</div>
+      </div>
 
-      <div id="delayBlock" class="hide">
-        <div class="muted" style="margin-top:10px;">Delay reason</div>
+      <div class="muted" id="locs"></div>
+
+      <div class="btnGrid" id="btnGrid">
+        <button class="btn primary" id="pickupBtn">
+          <div class="icon">📦</div>
+          <div>
+            Pick up
+            <small id="pickupLbl">Pick up from …</small>
+          </div>
+        </button>
+
+        <button class="btn primary" id="deliveredBtn">
+          <div class="icon">✅</div>
+          <div>
+            Delivered
+            <small id="delivLbl">Delivered at …</small>
+          </div>
+        </button>
+
+        <button class="btn delay" id="delayBtn">
+          <div class="icon">⏱️</div>
+          <div>
+            Delay
+            <small>Choose reason and add notes (optional)</small>
+          </div>
+        </button>
+      </div>
+
+      <div id="delayBlock" class="hide" style="margin-top:14px;">
+        <div class="muted">Delay reason</div>
         <select id="reason">
           <option value="">Select a reason</option>
           <option>Traffic</option>
@@ -41,10 +99,14 @@
         <div class="muted" style="margin-top:10px;">Notes (optional)</div>
         <textarea id="notes" placeholder="Add short details…"></textarea>
 
-        <button class="btn" id="delaySubmit">Submit delay</button>
+        <button class="btn primary" id="delaySubmit" style="margin-top:12px;">
+          <div class="icon">📨</div>
+          <div>Submit Delay<small>Send with current GPS</small></div>
+        </button>
       </div>
 
-      <div class="status" id="status"></div>
+      <div class="status" id="status">Ready.</div>
+      <div class="note" id="pingInfo"></div>
     </div>
   </div>
 
@@ -55,15 +117,28 @@
   }
 
   const token = qs("token");
-  const type = qs("type"); // PICKED_UP | DELIVERED | DELAY
+  const type = qs("type"); // optional: PICKED_UP | DELIVERED | DELAY
 
-  const title = document.getElementById("title");
   const sub = document.getElementById("sub");
   const statusEl = document.getElementById("status");
+  const pingInfo = document.getElementById("pingInfo");
+
+  const orderPill = document.getElementById("orderPill");
+  const locs = document.getElementById("locs");
+  const pickupLbl = document.getElementById("pickupLbl");
+  const delivLbl = document.getElementById("delivLbl");
+
+  const pickupBtn = document.getElementById("pickupBtn");
+  const deliveredBtn = document.getElementById("deliveredBtn");
+  const delayBtn = document.getElementById("delayBtn");
+
   const delayBlock = document.getElementById("delayBlock");
   const reason = document.getElementById("reason");
   const notes = document.getElementById("notes");
   const delaySubmit = document.getElementById("delaySubmit");
+
+  let pingTimer = null;
+  let lastPingAt = null;
 
   function setStatus(msg, kind) {
     statusEl.className = "status " + (kind === "ok" ? "ok" : kind === "err" ? "err" : "");
@@ -81,22 +156,54 @@
     });
   }
 
+  function updatePingInfo(source) {
+    if (!lastPingAt) return;
+    pingInfo.textContent = `Tracking: last GPS ping ${lastPingAt.toLocaleTimeString()} (${source}). Pings run every 10 min while this page stays open/active.`;
+  }
+
+  async function sendPingOnce(source) {
+    try {
+      const geo = await getGeo();
+      if (!geo) return;
+
+      await fetch("/api/ping", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, geo })
+      }).catch(() => {});
+
+      lastPingAt = new Date();
+      updatePingInfo(source);
+    } catch {}
+  }
+
+  async function startPings() {
+    if (pingTimer) return;
+
+    await sendPingOnce("start");
+
+    pingTimer = setInterval(() => sendPingOnce("10-min"), 10 * 60 * 1000);
+
+    // Immediate ping when page becomes active again:
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") sendPingOnce("visibility");
+    });
+    window.addEventListener("focus", () => sendPingOnce("focus"));
+    window.addEventListener("pageshow", () => sendPingOnce("pageshow"));
+
+    window.addEventListener("beforeunload", () => {
+      if (pingTimer) clearInterval(pingTimer);
+    });
+  }
+
   async function submit(milestoneType, delayReason, delayNotes) {
     try {
-      if (!token || !milestoneType) throw new Error("Invalid link.");
-
-      title.textContent = "Submitting…";
+      if (!token) throw new Error("Invalid link.");
       setStatus("Requesting location…");
 
       const geo = await getGeo();
 
-      const payload = {
-        token,
-        milestoneType,
-        delayReason,
-        delayNotes,
-        geo
-      };
+      const payload = { token, milestoneType, delayReason, delayNotes, geo };
 
       const r = await fetch("/api/submit", {
         method: "POST",
@@ -107,39 +214,57 @@
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "Submit failed");
 
-      title.textContent = "Submitted ✅";
-      sub.textContent = "Thank you. You can close this page now.";
-      setStatus("Milestone submitted successfully.", "ok");
+      setStatus("Submitted ✅ Thank you!", "ok");
+      sub.textContent = "You can keep this page open for GPS pings.";
+      await startPings();
     } catch (e) {
-      title.textContent = "Could not submit";
       setStatus(e.message, "err");
     }
   }
 
-  // If delay: show form and wait
-  if (type === "DELAY") {
-    title.textContent = "Delay";
-    sub.textContent = "Select a reason and submit.";
-    delayBlock.classList.remove("hide");
+  async function loadContext() {
+    const r = await fetch(`/api/context?token=${encodeURIComponent(token)}`);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Failed to load context");
 
-    delaySubmit.addEventListener("click", () => {
-      if (!reason.value) {
-        setStatus("Please select a delay reason.", "err");
-        return;
-      }
-      setStatus("");
-      submit("DELAY", reason.value, notes.value);
-    });
-  } else if (type === "PICKED_UP") {
-    title.textContent = "Pick up";
-    submit("PICKED_UP");
-  } else if (type === "DELIVERED") {
-    title.textContent = "Delivered";
-    submit("DELIVERED");
-  } else {
-    title.textContent = "Invalid link";
-    setStatus("Missing event type.", "err");
+    orderPill.textContent = `Order: ${data.orderNumber}`;
+    locs.textContent = `Pick up: ${data.pickupLocation} • Delivery: ${data.deliveryLocation}`;
+    pickupLbl.textContent = `Pick up from ${data.pickupLocation}`;
+    delivLbl.textContent = `Delivered at ${data.deliveryLocation}`;
   }
+
+  pickupBtn.addEventListener("click", () => submit("PICKED_UP"));
+  deliveredBtn.addEventListener("click", () => submit("DELIVERED"));
+  delayBtn.addEventListener("click", () => {
+    delayBlock.classList.remove("hide");
+    setStatus("Select delay reason and submit.");
+  });
+  delaySubmit.addEventListener("click", () => {
+    if (!reason.value) return setStatus("Please select a delay reason.", "err");
+    submit("DELAY", reason.value, notes.value);
+  });
+
+  (async () => {
+    try {
+      await loadContext();
+
+      // If opened from PDF button with type=..., auto-submit (except delay)
+      if (type === "PICKED_UP") {
+        setStatus("Submitting Pick up…");
+        submit("PICKED_UP");
+      } else if (type === "DELIVERED") {
+        setStatus("Submitting Delivered…");
+        submit("DELIVERED");
+      } else if (type === "DELAY") {
+        delayBlock.classList.remove("hide");
+        setStatus("Select delay reason and submit.");
+      } else {
+        setStatus("Choose an update below.");
+      }
+    } catch (e) {
+      setStatus(e.message, "err");
+    }
+  })();
 </script>
 </body>
 </html>

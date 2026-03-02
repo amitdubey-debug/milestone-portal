@@ -7,11 +7,33 @@ const qrWrap = ids("qrWrap");
 const qrImg = ids("qrImg");
 
 let last = null;
+let lastShort = null;
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   }[c]));
+}
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // fallback
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+      ta.remove();
+      return true;
+    } catch {
+      ta.remove();
+      return false;
+    }
+  }
 }
 
 async function downloadPdf() {
@@ -59,6 +81,7 @@ genBtn.addEventListener("click", async () => {
   qrWrap.style.display = "none";
   pdfBtn.style.display = "none";
   last = null;
+  lastShort = null;
 
   const payload = {
     orderNumber: ids("orderNumber").value.trim(),
@@ -77,18 +100,31 @@ genBtn.addEventListener("click", async () => {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || "Failed");
 
+    lastShort = data.shortLanding;
+
     out.style.display = "block";
     out.innerHTML = `
-      <div><b>Milestone link:</b> <a href="${data.link}" target="_blank">${escapeHtml(data.link)}</a></div>
+      <div><b>Driver landing (short):</b></div>
+      <div class="copyRow">
+        <a class="mono" href="${data.shortLanding}" target="_blank">${escapeHtml(data.shortLanding)}</a>
+        <button class="small secondary" id="copyBtn">Copy</button>
+      </div>
+
+      <div style="margin-top:10px"><b>Milestone link (full):</b> <a href="${data.link}" target="_blank">${escapeHtml(data.link)}</a></div>
       <div style="margin-top:6px"><b>Live dashboard:</b> <a href="${data.dashboard}" target="_blank">${escapeHtml(data.dashboard)}</a></div>
       <div style="margin-top:6px" class="muted">Token expires in ${data.expiresInMinutes} minutes</div>
     `;
 
-    // QR from server (points to /oneclick pickup)
-    qrImg.src = data.qrDataUrl;
+    const copyBtn = document.getElementById("copyBtn");
+    copyBtn.addEventListener("click", async () => {
+      const ok = await copyToClipboard(lastShort);
+      copyBtn.textContent = ok ? "Copied ✅" : "Copy failed";
+      setTimeout(() => (copyBtn.textContent = "Copy"), 1500);
+    });
+
+    qrImg.src = data.qrDataUrl; // QR opens landing (all updates)
     qrWrap.style.display = "block";
 
-    // store for PDF generation (IMPORTANT: include token)
     last = {
       orderNumber: payload.orderNumber,
       pickupLocation: payload.pickupLocation,
