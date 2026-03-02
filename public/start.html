@@ -3,14 +3,17 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Start Tracking</title>
+  <title>Open Driver Page</title>
+
   <style>
     :root{
       --bg:#f5f7ff; --card:#fff; --text:#0f172a; --muted:#5b6477; --border:#e6e9f5;
       --shadow:0 12px 30px rgba(15,23,42,.10); --shadow2:0 8px 18px rgba(15,23,42,.10);
       --radius:18px; --blue1:#4f46e5; --blue2:#7c3aed;
     }
+
     *{box-sizing:border-box}
+
     body{
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       margin:0;
@@ -19,43 +22,97 @@
                   var(--bg);
       color:var(--text);
     }
-    .wrap{max-width:680px;margin:18px auto;padding:14px}
-    .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px}
-    h1{margin:0;font-size:18px}
-    .muted{color:var(--muted);font-size:13px;margin-top:6px;line-height:1.35}
-    .grid{display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px}
-    .field label{display:block;font-size:12px;color:#334155;font-weight:800;margin-bottom:6px}
+
+    .wrap{max-width:680px;margin:40px auto;padding:14px}
+
+    .card{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      padding:22px;
+    }
+
+    h1{margin:0;font-size:20px}
+
+    .muted{
+      color:var(--muted);
+      font-size:13px;
+      margin-top:6px;
+      line-height:1.4;
+    }
+
+    .grid{
+      display:grid;
+      gap:14px;
+      margin-top:18px;
+    }
+
+    .field label{
+      display:block;
+      font-size:12px;
+      font-weight:800;
+      margin-bottom:6px;
+    }
+
     .field input{
-      width:100%;padding:12px;border-radius:14px;border:1px solid var(--border);
-      font-size:14px;outline:none;background:#fff;
-    }
-    .btn{
-      border:0;border-radius:16px;padding:12px 14px;cursor:pointer;font-weight:900;letter-spacing:.2px;
-      color:#fff;box-shadow:var(--shadow2);
-      background: linear-gradient(135deg,var(--blue1),var(--blue2));
       width:100%;
+      padding:13px;
+      border-radius:14px;
+      border:1px solid var(--border);
+      font-size:14px;
+      outline:none;
     }
-    .btn:active{transform:translateY(1px)}
-    .btn:disabled{opacity:.65;cursor:not-allowed;box-shadow:none}
+
+    .field input:focus{
+      border-color:#4f46e5;
+      box-shadow:0 0 0 3px rgba(79,70,229,.15);
+    }
+
+    .btn{
+      border:0;
+      border-radius:16px;
+      padding:14px;
+      cursor:pointer;
+      font-weight:900;
+      letter-spacing:.2px;
+      color:#fff;
+      background:linear-gradient(135deg,var(--blue1),var(--blue2));
+      box-shadow:var(--shadow2);
+      width:100%;
+      font-size:15px;
+    }
+
+    .btn:disabled{
+      opacity:.6;
+      cursor:not-allowed;
+      box-shadow:none;
+    }
+
     .status{
-      margin-top:12px;border-radius:14px;border:1px dashed var(--border);background:#fbfcff;
-      padding:10px 12px;font-size:14px;
+      margin-top:12px;
+      border-radius:14px;
+      border:1px dashed var(--border);
+      background:#fbfcff;
+      padding:10px 12px;
+      font-size:14px;
     }
+
     .err{color:#b91c1c;font-weight:900}
-    .ok{color:#0a6;font-weight:900}
-    a{color:#1d4ed8;font-weight:800;word-break:break-all}
-    .note{margin-top:8px;color:var(--muted);font-size:12px}
   </style>
 </head>
+
 <body>
   <div class="wrap">
     <div class="card">
-      <h1>Open Driver Milestone Page</h1>
+      <h1>Open Driver Page</h1>
       <div class="muted">
-        Enter the Order Number and Pick up location/city. We’ll generate a token and open the milestone update page.
+        Enter the Order Number and Pick up location.  
+        We’ll generate a secure token and open the One-Click update page.
       </div>
 
       <div class="grid">
+
         <div class="field">
           <label>Order Number *</label>
           <input id="orderNumber" placeholder="e.g. 686868678687" />
@@ -66,12 +123,10 @@
           <input id="pickupLocation" placeholder="e.g. Bremerhaven Port" />
         </div>
 
-        <button class="btn" id="goBtn">Open</button>
+        <button class="btn" id="goBtn">Open One-Click Page</button>
 
         <div class="status" id="status">Ready.</div>
-        <div class="note">
-          (Demo) In production you’d verify order ownership before issuing a token.
-        </div>
+
       </div>
     </div>
   </div>
@@ -80,67 +135,60 @@
   const statusEl = document.getElementById("status");
   const goBtn = document.getElementById("goBtn");
 
-  function setStatus(msg, kind){
-    if (kind === "err") statusEl.innerHTML = `<span class="err">${msg}</span>`;
-    else if (kind === "ok") statusEl.innerHTML = `<span class="ok">${msg}</span>`;
-    else statusEl.textContent = msg;
-  }
-
-  async function openDriverPage(){
-    const orderNumber = document.getElementById("orderNumber").value.trim();
-    const pickupLocation = document.getElementById("pickupLocation").value.trim();
-
-    if (!orderNumber) return setStatus("Order Number is required.", "err");
-    if (!pickupLocation) return setStatus("Pick up location / city is required.", "err");
-
-    goBtn.disabled = true;
-    setStatus("Generating token…");
-
-    try{
-      const r = await fetch("/api/start", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({
-          orderNumber,
-          pickupLocation,
-          ttlMinutes: 60 * 24 * 7 // optional 7 days
-        })
-      });
-
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok){
-        goBtn.disabled = false;
-        return setStatus(data.error || "Failed", "err");
-      }
-
-      // data.link is returned as /oneclick?token=...
-      // We want /milestone?token=...
-      const link = new URL(data.link, location.origin);
-      const token = link.searchParams.get("token");
-
-      if (!token){
-        goBtn.disabled = false;
-        return setStatus("Server did not return token.", "err");
-      }
-
-      const milestoneUrl = `/milestone?token=${encodeURIComponent(token)}`;
-      setStatus(`Opening: <a href="${milestoneUrl}">${location.origin}${milestoneUrl}</a>`, "ok");
-      window.location.href = milestoneUrl;
-
-    }catch(e){
-      goBtn.disabled = false;
-      setStatus("Network error. Please try again.", "err");
+  function setStatus(msg, isError){
+    if(isError){
+      statusEl.innerHTML = `<span class="err">${msg}</span>`;
+    }else{
+      statusEl.textContent = msg;
     }
   }
 
-  goBtn.addEventListener("click", openDriverPage);
+  async function openOneClick(){
+    const orderNumber = document.getElementById("orderNumber").value.trim();
+    const pickupLocation = document.getElementById("pickupLocation").value.trim();
+
+    if(!orderNumber) return setStatus("Order Number is required.", true);
+    if(!pickupLocation) return setStatus("Pick up location is required.", true);
+
+    goBtn.disabled = true;
+    setStatus("Generating secure link…");
+
+    try{
+      const r = await fetch("/api/start", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          orderNumber,
+          pickupLocation,
+          ttlMinutes: 60 * 24 * 7 // 7 days (optional)
+        })
+      });
+
+      const data = await r.json().catch(()=>({}));
+
+      if(!r.ok){
+        goBtn.disabled = false;
+        return setStatus(data.error || "Failed to generate link.", true);
+      }
+
+      // Direct redirect to OneClick page
+      window.location.href = data.link;
+
+    }catch(e){
+      goBtn.disabled = false;
+      setStatus("Network error. Please try again.", true);
+    }
+  }
+
+  goBtn.addEventListener("click", openOneClick);
 
   // Enter key support
   ["orderNumber","pickupLocation"].forEach(id=>{
-    document.getElementById(id).addEventListener("keydown", (e)=>{
-      if(e.key === "Enter") openDriverPage();
+    document.getElementById(id).addEventListener("keydown", e=>{
+      if(e.key === "Enter") openOneClick();
     });
   });
 </script>
+
 </body>
 </html>

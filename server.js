@@ -149,12 +149,11 @@ app.post("/api/link", async (req, res) => {
 app.post("/api/start", (req, res) => {
   const { orderNumber, pickupLocation, ttlMinutes } = req.body || {};
 
-  if (!orderNumber) {
+  if (!orderNumber)
     return res.status(400).json({ error: "orderNumber is required" });
-  }
-  if (!pickupLocation) {
+
+  if (!pickupLocation)
     return res.status(400).json({ error: "pickupLocation is required" });
-  }
 
   const { token } = mintToken({
     orderNumber,
@@ -164,7 +163,6 @@ app.post("/api/start", (req, res) => {
   });
 
   const baseUrl = baseUrlFromReq(req);
-  // keep returning oneclick link (client extracts token + redirects to /milestone)
   const link = `${baseUrl}/oneclick?token=${encodeURIComponent(token)}`;
 
   res.json({ link });
