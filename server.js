@@ -429,10 +429,17 @@ app.post("/api/pdf", async (req, res) => {
       .text(String(s ?? ""), x, y, opts);
   };
 
-function oneLine(value, max = 42) {
+function oneLineByWidth(doc, value, maxWidth, fontName = "Helvetica", fontSize = 9) {
   const s = String(value ?? "");
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + "…";
+  doc.font(fontName).fontSize(fontSize);
+
+  if (doc.widthOfString(s) <= maxWidth) return s;
+
+  let out = s;
+  while (out.length > 0 && doc.widthOfString(out + "…") > maxWidth) {
+    out = out.slice(0, -1);
+  }
+  return out + "…";
 }
 
 const row = (label, value, xLabel, xValue, y) => {
@@ -440,7 +447,11 @@ const row = (label, value, xLabel, xValue, y) => {
   const valueW = (R - 10) - xValue; // small right padding
 
   txt(label, xLabel, y, 9, true, { width: labelW });
-  txt(oneLine(value, 45), xValue, y, 9, false, { width: valueW });
+
+  const safe = oneLineByWidth(doc, value, valueW, "Helvetica", 9);
+
+  // IMPORTANT: do NOT allow wrapping
+  txt(safe, xValue, y, 9, false, { width: valueW, lineBreak: false });
 };
 
   // ===================== PAGE 1 =====================
@@ -463,8 +474,9 @@ const row = (label, value, xLabel, xValue, y) => {
   const xValueL = L + 220;
 
   // Right section positions
-const xLabelR = L + 330;   // move label column slightly left
-const xValueR = L + 470;   // move value column left (this is the big fix)
+const xLabelR = L + 315;
+const xValueR = L + 455;      // must be < R
+const rightValueW = R - xValueR; // auto width until margin
 
   // Transport by block (left)
   txt("Transport By", xLabelL, 210, 9, true);
@@ -479,34 +491,57 @@ const xValueR = L + 470;   // move value column left (this is the big fix)
   row("Customer Name", d.customerName, xLabelL, xValueL, 306, 260);
 
   // Right list (like sample)
-  row("Work Order Number", d.workOrderNumber, xLabelR, xValueR, 200);
-  row("Forwarding Order Number", d.forwardingOrderNumber, xLabelR, xValueR, 218, 220);
+  row("Work Order Number", d.workOrderNumber, xLabelR, xValueR, 200, rightValueW);
+  row("Forwarding Order Number", d.forwardingOrderNumber, xLabelR, xValueR, 218, 220, rightValueW);
 
-  row("Transport Mode", d.transportMode, xLabelR, xValueR, 246, 220);
-  row("Ocean Carrier", d.oceanCarrier, xLabelR, xValueR, 264, 220);
-  row("Move Type", d.moveType, xLabelR, xValueR, 282, 220);
+  row("Transport Mode", d.transportMode, xLabelR, xValueR, 246, 220, rightValueW);
+  row("Ocean Carrier", d.oceanCarrier, xLabelR, xValueR, 264, 220, rightValueW);
+  row("Move Type", d.moveType, xLabelR, xValueR, 282, 220, rightValueW);
 
-  row("Earliest Port Receipt Date", d.earliestPortReceiptDate, xLabelR, xValueR, 310, 220);
-  row("Vessel Cutoff Date", d.vesselCutoffDate, xLabelR, xValueR, 328, 220);
-  row("Vessel Departure Date", d.vesselDepartureDate, xLabelR, xValueR, 346, 220);
-  row("Vessel/Voyage", d.vesselVoyage, xLabelR, xValueR, 364, 220);
+  row("Earliest Port Receipt Date", d.earliestPortReceiptDate, xLabelR, xValueR, 310, 220, rightValueW);
+  row("Vessel Cutoff Date", d.vesselCutoffDate, xLabelR, xValueR, 328, 220, rightValueW);
+  row("Vessel Departure Date", d.vesselDepartureDate, xLabelR, xValueR, 346, 220, rightValueW);
+  row("Vessel/Voyage", d.vesselVoyage, xLabelR, xValueR, 364, 220, rightValueW);
 
 const valueW_R = (R - 10) - xValueR;
 
-txt("Place of Receipt", xLabelR, 392, 9, true);
-txt(d.placeOfReceipt, xValueR, 392, 8, false, { width: valueW_R });
+const smallFont = 8;
 
-txt("Port of Loading", xLabelR, 410, 9, true);
-txt(d.portOfLoading, xValueR, 410, 8, false, { width: valueW_R });
+txt(
+  truncateToWidth(doc, d.portOfLoading, rightValueW, "Helvetica", smallFont),
+  xValueR,
+  410,
+  smallFont,
+  false,
+  { width: rightValueW, lineBreak: false }
+);
 
-txt("Next Port", xLabelR, 428, 9, true);
-txt(d.nextPort, xValueR, 428, 8, false, { width: valueW_R });
+txt(
+  truncateToWidth(doc, d.nextPort, rightValueW, "Helvetica", smallFont),
+  xValueR,
+  428,
+  smallFont,
+  false,
+  { width: rightValueW, lineBreak: false }
+);
 
-txt("Port of Discharge", xLabelR, 446, 9, true);
-txt(d.portOfDischarge, xValueR, 446, 8, false, { width: valueW_R });
+txt(
+  truncateToWidth(doc, d.portOfDischarge, rightValueW, "Helvetica", smallFont),
+  xValueR,
+  446,
+  smallFont,
+  false,
+  { width: rightValueW, lineBreak: false }
+);
 
-txt("Place of Delivery", xLabelR, 464, 9, true);
-txt(d.placeOfDelivery, xValueR, 464, 8, false, { width: valueW_R });
+txt(
+  truncateToWidth(doc, d.placeOfDelivery, rightValueW, "Helvetica", smallFont),
+  xValueR,
+  464,
+  smallFont,
+  false,
+  { width: rightValueW, lineBreak: false }
+);
 
   // Equipment & Cargo header with lines (sample)
   hline(510);
