@@ -344,7 +344,7 @@ app.post("/api/pdf", async (req, res) => {
 
   // WhatsApp QR
   const whatsappNumber = "447345485597"; // +44-7345485597 -> digits only
-  const whatsappText = `Order ${orderNumber}`;
+  const whatsappText = `${orderNumber}`;
   const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(whatsappText)}`;
 
   const driverQrPng = await QRCode.toBuffer(landingUrl, { width: 420, margin: 1 });
@@ -357,7 +357,7 @@ app.post("/api/pdf", async (req, res) => {
     dispatcherEmail: "nl.execution@lns.maersk.com",
     systemDate: new Date().toLocaleString("en-GB").replace(",", ""),
 
-    transportByName: "CONTARGO WOERTH GMBH",
+    transportByName: "CONTARGO WOERT",
     transportByStreet: "HAFENSTRASSE",
     transportByCity: "76744 Woerth a Rhein",
     transportByCountry: "Germany",
@@ -674,7 +674,7 @@ txt("Page 1 of 2", R - 90, 770, 9, false);
   doc.image(driverQrPng, qx1, qy, { fit: [qrSize, qrSize] });
   doc.image(whatsappQrPng, qx2, qy, { fit: [qrSize, qrSize] });
 
-  txt2(`WhatsApp to +44 7345 485597 with: "Order ${orderNumber}"`, qx2, qy + qrSize + 14, 10, false);
+  txt2(`WhatsApp to MSK with: "Order ${orderNumber}"`, qx2, qy + qrSize + 14, 10, false);
 // Clickable one-click driver link
 const driverLinkLabel = "Driver link (one-click): ";
 const linkY = qy + qrSize + 34;
