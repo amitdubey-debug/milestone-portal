@@ -92,7 +92,6 @@ app.get("/milestone", (req, res) => res.sendFile(path.join(__dirname, "public", 
 app.get("/oneclick", (req, res) => res.sendFile(path.join(__dirname, "public", "oneclick.html")));
 
 // ---------- Short links ----------
-// /s/<code> -> /oneclick?token=...&type=...
 app.get("/s/:code", (req, res) => {
   const code = String(req.params.code || "");
   const map = readShortlinks();
@@ -101,20 +100,12 @@ app.get("/s/:code", (req, res) => {
 
   const url = new URL(`${baseUrlFromReq(req)}/oneclick`);
   url.searchParams.set("token", entry.token);
-
-  // optional: type = PICKED_UP / DELIVERED / DELAY
   if (req.query.type) url.searchParams.set("type", String(req.query.type));
-
   res.redirect(url.toString());
 });
 
 // ---------- API ----------
 
-/**
- * POST /api/link
- * body: { orderNumber, pickupLocation, deliveryLocation, ttlMinutes }
- * returns: { token, link, shortLanding, qrDataUrl, dashboard, expiresInMinutes }
- */
 app.post("/api/link", async (req, res) => {
   const { orderNumber, pickupLocation, deliveryLocation, ttlMinutes } = req.body || {};
   if (!orderNumber || !pickupLocation || !deliveryLocation) {
@@ -139,27 +130,18 @@ app.post("/api/link", async (req, res) => {
   });
 
   const baseUrl = baseUrlFromReq(req);
-
-  // Full milestone page (still available)
   const link = `${baseUrl}/milestone?token=${encodeURIComponent(token)}`;
 
-  // Short landing link (NO type) => shows all options
   const landingCode = createShortCode(token);
   const shortLanding = `${baseUrl}/s/${landingCode}`;
-
-  // Dashboard
   const dashboard = `${baseUrl}/dashboard?order=${encodeURIComponent(orderNumber)}`;
 
-  // QR points to landing (all updates)
   const qrPngBuffer = await QRCode.toBuffer(shortLanding, { width: 360, margin: 1 });
   const qrDataUrl = `data:image/png;base64,${qrPngBuffer.toString("base64")}`;
 
   res.json({ token, link, shortLanding, qrDataUrl, dashboard, expiresInMinutes: effectiveTtl });
 });
 
-/**
- * GET /api/context?token=...
- */
 app.get("/api/context", (req, res) => {
   const token = req.query.token;
   if (!token) return res.status(400).json({ error: "Missing token" });
@@ -177,10 +159,6 @@ app.get("/api/context", (req, res) => {
   }
 });
 
-/**
- * GET /api/milestones?order=...
- * Used by dashboard refresh (reads JSON fresh)
- */
 app.get("/api/milestones", (req, res) => {
   const order = String(req.query.order || "");
   const all = readMilestones();
@@ -188,10 +166,6 @@ app.get("/api/milestones", (req, res) => {
   res.json(all.filter((m) => m.orderNumber === order));
 });
 
-/**
- * SSE: GET /api/stream?order=...
- * Sends bootstrap list immediately + then live events.
- */
 app.get("/api/stream", (req, res) => {
   const order = String(req.query.order || "");
   if (!order) return res.status(400).json({ error: "Missing order" });
@@ -206,7 +180,6 @@ app.get("/api/stream", (req, res) => {
   if (!subscribers.has(order)) subscribers.set(order, new Set());
   subscribers.get(order).add(res);
 
-  // IMPORTANT: read JSON fresh on every connection
   const all = readMilestones().filter((m) => m.orderNumber === order);
   res.write(`event: bootstrap\ndata: ${JSON.stringify(all)}\n\n`);
 
@@ -220,10 +193,6 @@ app.get("/api/stream", (req, res) => {
   });
 });
 
-/**
- * POST /api/submit
- * body: { token, milestoneType, delayReason?, delayNotes?, geo? }
- */
 app.post("/api/submit", (req, res) => {
   const { token, milestoneType, delayReason, delayNotes, geo } = req.body || {};
   if (!token || !milestoneType) return res.status(400).json({ error: "token and milestoneType are required" });
@@ -268,11 +237,11 @@ app.post("/api/submit", (req, res) => {
 
 /**
  * POST /api/ping
- * body: { token, geo }
- * For 10-min pings + ping-on-resume
+ * body: { token, geo, pingSource? }
+ * Stores pingSource so dashboard can show why the ping happened.
  */
 app.post("/api/ping", (req, res) => {
-  const { token, geo } = req.body || {};
+  const { token, geo, pingSource } = req.body || {};
   if (!token) return res.status(400).json({ error: "token is required" });
 
   let decoded;
@@ -296,6 +265,7 @@ app.post("/api/ping", (req, res) => {
     receivedAtUtc: new Date().toISOString(),
     orderNumber: decoded.orderNumber,
     milestoneType: "GPS_PING",
+    pingSource: pingSource ? String(pingSource) : null,
     geo: cleanGeo
   };
 
@@ -304,14 +274,7 @@ app.post("/api/ping", (req, res) => {
   res.json({ ok: true });
 });
 
-/**
- * POST /api/pdf
- * body: { orderNumber, pickupLocation, deliveryLocation, expiresInMinutes, token }
- * Generates a PDF with:
- * - QR to landing (all updates)
- * - Clickable “buttons” (clean font, no emojis)
- * - Short fallback link (fully clickable + copyable)
- */
+// PDF endpoint (unchanged from your previous final version)
 app.post("/api/pdf", async (req, res) => {
   const { orderNumber, pickupLocation, deliveryLocation, expiresInMinutes, token } = req.body || {};
   if (!orderNumber || !pickupLocation || !deliveryLocation || !token) {
@@ -320,13 +283,11 @@ app.post("/api/pdf", async (req, res) => {
 
   const baseUrl = baseUrlFromReq(req);
 
-  // short links (small and easy to click/copy)
   const landingUrl = `${baseUrl}/s/${createShortCode(token)}`;
   const pickupUrl = `${baseUrl}/s/${createShortCode(token)}?type=PICKED_UP`;
   const deliveredUrl = `${baseUrl}/s/${createShortCode(token)}?type=DELIVERED`;
   const delayUrl = `${baseUrl}/s/${createShortCode(token)}?type=DELAY`;
 
-  // QR opens landing (all updates)
   const qrPngBuffer = await QRCode.toBuffer(landingUrl, { width: 460, margin: 1 });
 
   res.setHeader("Content-Type", "application/pdf");
@@ -341,7 +302,6 @@ app.post("/api/pdf", async (req, res) => {
   const left = doc.page.margins.left;
   const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
 
-  // Header
   doc.font("Helvetica-Bold").fontSize(18).fillColor("#000").text("Milestone Update", left, 56);
   doc.font("Helvetica").fontSize(11).fillColor("#555")
     .text("Tap a button (PDF link) → browser opens → allow location → event sent.", left, 78);
@@ -349,7 +309,6 @@ app.post("/api/pdf", async (req, res) => {
 
   doc.moveTo(left, 100).lineTo(left + width, 100).strokeColor("#DDD").stroke();
 
-  // Details
   let y = 118;
   doc.font("Helvetica-Bold").fontSize(14).text(`Order: ${orderNumber}`, left, y);
   y += 22;
@@ -364,11 +323,9 @@ app.post("/api/pdf", async (req, res) => {
   doc.moveTo(left, y).lineTo(left + width, y).strokeColor("#DDD").stroke();
   y += 18;
 
-  // QR
   const qrSize = 220;
   doc.image(qrPngBuffer, left, y, { fit: [qrSize, qrSize] });
 
-  // Steps
   const stepsX = left + qrSize + 18;
   const stepsW = left + width - stepsX;
   doc.font("Helvetica-Bold").fontSize(14).text("Driver steps", stepsX, y);
@@ -381,7 +338,6 @@ app.post("/api/pdf", async (req, res) => {
     sy += 18;
   }
 
-  // Buttons (clickable rectangles)
   y = y + qrSize + 24;
   doc.font("Helvetica-Bold").fontSize(12).text("Tap buttons (clickable links):", left, y);
   y += 14;
@@ -390,11 +346,9 @@ app.post("/api/pdf", async (req, res) => {
     const h = 66;
     doc.roundedRect(left, y, width, h, 10).lineWidth(1).strokeColor("#D0D0D0").stroke();
     doc.link(left, y, width, h, url);
-
     doc.fillColor("#000").font("Helvetica-Bold").fontSize(12).text(title, left + 14, y + 12, { width: width - 28 });
     doc.fillColor("#666").font("Helvetica").fontSize(10).text(subtitle, left + 14, y + 32, { width: width - 28 });
     doc.fillColor("#000");
-
     y += h + 10;
   }
 
@@ -402,7 +356,6 @@ app.post("/api/pdf", async (req, res) => {
   linkBox(`[DELIVERED]  ${deliveryLocation}`, "Submit DELIVERED with current GPS.", deliveredUrl);
   linkBox(`[DELAY]`, "Open delay page (choose reason + submit with GPS).", delayUrl);
 
-  // Fallback short link (short + fully clickable + copyable)
   y += 6;
   doc.moveTo(left, y).lineTo(left + width, y).strokeColor("#DDD").stroke();
   y += 14;

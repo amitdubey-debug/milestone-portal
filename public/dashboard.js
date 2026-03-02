@@ -28,6 +28,7 @@ const layers = {
 };
 
 const trailPts = [];
+const MAX_TRAIL_POINTS = 1500; // safety cap
 
 function safeLatLng(obj) {
   if (!obj) return null;
@@ -69,6 +70,7 @@ function addRow(e) {
 
   const tdDet = document.createElement("td");
   const parts = [];
+  if (e.milestoneType === "GPS_PING" && e.pingSource) parts.push(`Source: ${e.pingSource}`);
   if (e.delayReason) parts.push(`Reason: ${e.delayReason}`);
   if (e.delayNotes) parts.push(`Notes: ${e.delayNotes}`);
   tdDet.textContent = parts.join(" • ") || "";
@@ -76,7 +78,8 @@ function addRow(e) {
   const tdGeo = document.createElement("td");
   if (e.geo?.lat && e.geo?.lon) {
     tdGeo.className = "mono";
-    tdGeo.textContent = `${Number(e.geo.lat).toFixed(5)}, ${Number(e.geo.lon).toFixed(5)}${e.geo.accuracy ? ` (±${Math.round(e.geo.accuracy)}m)` : ""}`;
+    tdGeo.textContent =
+      `${Number(e.geo.lat).toFixed(5)}, ${Number(e.geo.lon).toFixed(5)}${e.geo.accuracy ? ` (±${Math.round(e.geo.accuracy)}m)` : ""}`;
   } else {
     tdGeo.textContent = "";
   }
@@ -93,11 +96,15 @@ function addMapPoint(e) {
   if (!pt) return;
 
   trailPts.push(pt);
+  if (trailPts.length > MAX_TRAIL_POINTS) trailPts.shift();
   redrawTrail();
 
-  const label = `${e.milestoneType} @ ${e.receivedAtUtc}${e.delayReason ? " (" + e.delayReason + ")" : ""}`;
-  const radius = e.milestoneType === "GPS_PING" ? 4 : 7;
+  const label =
+    `${e.milestoneType} @ ${e.receivedAtUtc}` +
+    (e.pingSource ? ` (${e.pingSource})` : "") +
+    (e.delayReason ? ` (${e.delayReason})` : "");
 
+  const radius = e.milestoneType === "GPS_PING" ? 4 : 7;
   L.circleMarker(pt, { radius }).addTo(layers.points).bindPopup(label);
 
   map.setView(pt, Math.max(map.getZoom(), 11));
@@ -105,16 +112,11 @@ function addMapPoint(e) {
 
 function renderAll(all) {
   clearUI();
-
   all.sort((a, b) => String(a.receivedAtUtc).localeCompare(String(b.receivedAtUtc)));
 
   for (const e of all) {
     addRow(e);
-    const pt = safeLatLng(e.geo);
-    if (pt) {
-      // draw markers for everything with geo
-      addMapPoint(e);
-    }
+    if (safeLatLng(e.geo)) addMapPoint(e);
   }
 
   summaryEl.textContent = `Loaded ${all.length} events`;
@@ -123,7 +125,6 @@ function renderAll(all) {
   else map.setView([20, 0], 2);
 }
 
-// Refresh button reads JSON from server without redeploy
 refreshBtn.addEventListener("click", async () => {
   summaryEl.textContent = "Refreshing…";
   try {
@@ -135,16 +136,11 @@ refreshBtn.addEventListener("click", async () => {
   }
 });
 
-// SSE live stream
+// SSE
 const es = new EventSource(`/api/stream?order=${encodeURIComponent(order)}`);
 
-es.addEventListener("open", () => {
-  statusEl.textContent = "Connected ✅";
-});
-
-es.addEventListener("error", () => {
-  statusEl.textContent = "Disconnected / retrying…";
-});
+es.addEventListener("open", () => { statusEl.textContent = "Connected ✅"; });
+es.addEventListener("error", () => { statusEl.textContent = "Disconnected / retrying…"; });
 
 es.addEventListener("bootstrap", (evt) => {
   const all = JSON.parse(evt.data || "[]");
@@ -153,10 +149,7 @@ es.addEventListener("bootstrap", (evt) => {
 
 es.onmessage = (evt) => {
   const e = JSON.parse(evt.data);
-  // append new event live
   addRow(e);
   addMapPoint(e);
-
-  const count = rowsEl.children.length;
-  summaryEl.textContent = `Loaded ${count} events`;
+  summaryEl.textContent = `Loaded ${rowsEl.children.length} events`;
 };
