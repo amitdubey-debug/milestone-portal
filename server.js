@@ -36,11 +36,8 @@ if (!fs.existsSync(MILESTONES_FILE)) fs.writeFileSync(MILESTONES_FILE, JSON.stri
 if (!fs.existsSync(SHORTLINKS_FILE)) fs.writeFileSync(SHORTLINKS_FILE, JSON.stringify({}, null, 2));
 
 function readMilestones() {
-  try {
-    return JSON.parse(fs.readFileSync(MILESTONES_FILE, "utf8"));
-  } catch {
-    return [];
-  }
+  try { return JSON.parse(fs.readFileSync(MILESTONES_FILE, "utf8")); }
+  catch { return []; }
 }
 function writeMilestones(all) {
   fs.writeFileSync(MILESTONES_FILE, JSON.stringify(all, null, 2));
@@ -52,11 +49,8 @@ function appendMilestone(record) {
 }
 
 function readShortlinks() {
-  try {
-    return JSON.parse(fs.readFileSync(SHORTLINKS_FILE, "utf8"));
-  } catch {
-    return {};
-  }
+  try { return JSON.parse(fs.readFileSync(SHORTLINKS_FILE, "utf8")); }
+  catch { return {}; }
 }
 function writeShortlinks(obj) {
   fs.writeFileSync(SHORTLINKS_FILE, JSON.stringify(obj, null, 2));
@@ -87,6 +81,7 @@ function publish(orderNumber, event) {
 // ---------- Pages ----------
 app.get("/", (req, res) => res.redirect("/generate"));
 app.get("/generate", (req, res) => res.sendFile(path.join(__dirname, "public", "generate.html")));
+app.get("/start", (req, res) => res.sendFile(path.join(__dirname, "public", "start.html")));
 app.get("/dashboard", (req, res) => res.sendFile(path.join(__dirname, "public", "dashboard.html")));
 app.get("/milestone", (req, res) => res.sendFile(path.join(__dirname, "public", "milestone.html")));
 app.get("/oneclick", (req, res) => res.sendFile(path.join(__dirname, "public", "oneclick.html")));
@@ -99,7 +94,6 @@ app.get("/s/:code", (req, res) => {
   const entry = map[code];
   if (!entry?.token) return res.status(404).send("Invalid short link");
 
-  // mode=quick -> redirect to /quick for one-tap submit UX
   const mode = String(req.query.mode || "");
   const type = req.query.type ? String(req.query.type) : "";
 
@@ -110,13 +104,8 @@ app.get("/s/:code", (req, res) => {
   res.redirect(target.toString());
 });
 
-// ---------- API ----------
-app.post("/api/link", async (req, res) => {
-  const { orderNumber, pickupLocation, deliveryLocation, ttlMinutes } = req.body || {};
-  if (!orderNumber || !pickupLocation || !deliveryLocation) {
-    return res.status(400).json({ error: "Missing required fields: orderNumber, pickupLocation, deliveryLocation" });
-  }
-
+// ---------- Helpers ----------
+function mintToken({ orderNumber, pickupLocation, deliveryLocation, ttlMinutes }) {
   const requested = Number(ttlMinutes);
   const maxMinutes = 60 * 24 * 30;
   const effectiveTtl =
@@ -124,8 +113,8 @@ app.post("/api/link", async (req, res) => {
 
   const payload = {
     orderNumber: String(orderNumber),
-    pickupLocation: String(pickupLocation),
-    deliveryLocation: String(deliveryLocation),
+    pickupLocation: String(pickupLocation || "Unknown pickup"),
+    deliveryLocation: String(deliveryLocation || "Unknown delivery"),
     allowedMilestones: ["PICKED_UP", "DELIVERED", "DELAY"]
   };
 
@@ -134,20 +123,57 @@ app.post("/api/link", async (req, res) => {
     jwtid: nanoid(16)
   });
 
+  return { token, effectiveTtl };
+}
+
+// ---------- API ----------
+app.post("/api/link", async (req, res) => {
+  const { orderNumber, pickupLocation, deliveryLocation, ttlMinutes } = req.body || {};
+  if (!orderNumber || !pickupLocation || !deliveryLocation) {
+    return res.status(400).json({ error: "Missing required fields: orderNumber, pickupLocation, deliveryLocation" });
+  }
+
+  const { token, effectiveTtl } = mintToken({ orderNumber, pickupLocation, deliveryLocation, ttlMinutes });
+
   const baseUrl = baseUrlFromReq(req);
   const link = `${baseUrl}/milestone?token=${encodeURIComponent(token)}`;
 
-  // Landing short link should open full oneclick UI
   const landingCode = createShortCode(token);
   const shortLanding = `${baseUrl}/s/${landingCode}`;
 
   const dashboard = `${baseUrl}/dashboard?order=${encodeURIComponent(orderNumber)}`;
 
-  // QR should open "landing" (full page)
   const qrPngBuffer = await QRCode.toBuffer(shortLanding, { width: 360, margin: 1 });
   const qrDataUrl = `data:image/png;base64,${qrPngBuffer.toString("base64")}`;
 
   res.json({ token, link, shortLanding, qrDataUrl, dashboard, expiresInMinutes: effectiveTtl });
+});
+
+/**
+ * NEW: no-token start flow
+ * User provides orderNumber + at least one "verification" field.
+ * For demo we accept it and mint a token, then redirect to oneclick.
+ */
+app.post("/api/start", (req, res) => {
+  const { orderNumber, pickupLocation, deliveryLocation, vendorCode, phone, ttlMinutes } = req.body || {};
+  if (!orderNumber) return res.status(400).json({ error: "orderNumber is required" });
+
+  const hasAny = Boolean(
+    (pickupLocation && String(pickupLocation).trim()) ||
+    (deliveryLocation && String(deliveryLocation).trim()) ||
+    (vendorCode && String(vendorCode).trim()) ||
+    (phone && String(phone).trim())
+  );
+  if (!hasAny) {
+    return res.status(400).json({ error: "Provide at least one: pickupLocation, deliveryLocation, vendorCode, phone" });
+  }
+
+  // For demo: use provided pickup/delivery if present, else defaults.
+  const { token } = mintToken({ orderNumber, pickupLocation, deliveryLocation, ttlMinutes });
+
+  const baseUrl = baseUrlFromReq(req);
+  const link = `${baseUrl}/oneclick?token=${encodeURIComponent(token)}`;
+  res.json({ link });
 });
 
 app.get("/api/context", (req, res) => {
@@ -220,7 +246,6 @@ app.post("/api/submit", (req, res) => {
     return res.status(400).json({ error: "delayReason is required when milestoneType=DELAY" });
   }
 
-  // geo is OPTIONAL now (already was, but we keep it explicit)
   let cleanGeo = null;
   if (geo && typeof geo === "object") {
     const { lat, lon, accuracy } = geo;
@@ -237,7 +262,7 @@ app.post("/api/submit", (req, res) => {
     delayReason: milestoneType === "DELAY" ? String(delayReason) : null,
     delayNotes: milestoneType === "DELAY" ? String(delayNotes || "") : null,
     geo: cleanGeo,
-    gpsMissing: !cleanGeo // <-- flag for UI / dashboard
+    gpsMissing: !cleanGeo
   };
 
   appendMilestone(record);
@@ -245,11 +270,6 @@ app.post("/api/submit", (req, res) => {
   res.json({ ok: true, record });
 });
 
-/**
- * POST /api/ping
- * body: { token, geo?, pingSource? }
- * IMPORTANT: geo is OPTIONAL now (we store ping even if no GPS).
- */
 app.post("/api/ping", (req, res) => {
   const { token, geo, pingSource } = req.body || {};
   if (!token) return res.status(400).json({ error: "token is required" });
@@ -284,7 +304,7 @@ app.post("/api/ping", (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- PDF (UPDATED LINKS: pickup/delivered go to QUICK) ----------
+// ---------- PDF ----------
 app.post("/api/pdf", async (req, res) => {
   const { orderNumber, pickupLocation, deliveryLocation, expiresInMinutes, token } = req.body || {};
   if (!orderNumber || !pickupLocation || !deliveryLocation || !token) {
@@ -293,9 +313,6 @@ app.post("/api/pdf", async (req, res) => {
 
   const baseUrl = baseUrlFromReq(req);
 
-  // Short codes:
-  // - QR opens full oneclick (landing)
-  // - buttons open quick submit
   const landingUrl = `${baseUrl}/s/${createShortCode(token)}`; // full UI
   const pickupUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=PICKED_UP`;
   const deliveredUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=DELIVERED`;
@@ -344,12 +361,14 @@ app.post("/api/pdf", async (req, res) => {
   doc.font("Helvetica-Bold").fontSize(14).text("Driver steps", stepsX, y);
   doc.font("Helvetica").fontSize(12).fillColor("#000");
 
-  const steps = ["1) Tap a PDF button (Pick up / Delivered / Delay).", "2) Browser opens.", "3) Allow location (recommended).", "4) Submitted."];
+  const steps = [
+    "1) Tap a PDF button (Pick up / Delivered / Delay).",
+    "2) Browser opens.",
+    "3) Allow location (recommended).",
+    "4) Submitted."
+  ];
   let sy = y + 24;
-  for (const s of steps) {
-    doc.text(s, stepsX, sy, { width: stepsW });
-    sy += 18;
-  }
+  for (const s of steps) { doc.text(s, stepsX, sy, { width: stepsW }); sy += 18; }
 
   y = y + qrSize + 24;
   doc.font("Helvetica-Bold").fontSize(12).text("Tap buttons (clickable links):", left, y);
