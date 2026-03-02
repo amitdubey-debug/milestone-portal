@@ -279,6 +279,7 @@ app.post("/api/ping", (req, res) => {
 // ---------- PDF ----------
 // ---------- PDF (FRO-style, 2 pages, bounded layout) ----------
 // ---------- PDF (FRO sample-matching layout: 2 pages, fixed boxes, side-by-side QRs) ----------
+// ---------- PDF (sample-like layout: clean Page-1, fixed Page-2, no overlap on delay) ----------
 app.post("/api/pdf", async (req, res) => {
   const {
     orderNumber,
@@ -287,7 +288,6 @@ app.post("/api/pdf", async (req, res) => {
     expiresInMinutes,
     token,
 
-    // optional future fields
     bookingNumber,
     blNumber,
     customerName,
@@ -299,15 +299,18 @@ app.post("/api/pdf", async (req, res) => {
     vesselCutoffDate,
     vesselDepartureDate,
     vesselVoyage,
+
     placeOfReceipt,
     portOfLoading,
     nextPort,
     portOfDischarge,
     placeOfDelivery,
+
     equipmentType,
     containerSeal,
     tareWeight,
     totalWeight,
+
     cargoDescription,
     packageDescription,
     packageQty,
@@ -315,10 +318,12 @@ app.post("/api/pdf", async (req, res) => {
     packageUom,
     hsCode,
     bondedGoods,
+
     stageFrom,
     stageTo,
     appointmentFrom,
     appointmentTo,
+
     totalCost,
     detailedCostLine1,
     detailedCostLine2,
@@ -332,21 +337,20 @@ app.post("/api/pdf", async (req, res) => {
   const baseUrl = baseUrlFromReq(req);
 
   // Links
-  const landingUrl = `${baseUrl}/s/${createShortCode(token)}`; // full driver page
+  const landingUrl = `${baseUrl}/s/${createShortCode(token)}`;
   const pickupUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=PICKED_UP`;
   const deliveredUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=DELIVERED`;
   const delayUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=DELAY`;
 
   // WhatsApp QR
-  const whatsappNumber = "447345485597"; // +44-7345485597
+  const whatsappNumber = "447345485597"; // +44-7345485597 -> digits only
   const whatsappText = `Order ${orderNumber}`;
   const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(whatsappText)}`;
 
-  // QR images (smaller, consistent)
   const driverQrPng = await QRCode.toBuffer(landingUrl, { width: 420, margin: 1 });
   const whatsappQrPng = await QRCode.toBuffer(whatsappUrl, { width: 420, margin: 1 });
 
-  // Dummy-fill missing data to match sample
+  // Dummy defaults (like sample)
   const d = {
     dispatcher: "Dispatcher",
     dispatcherPhone: "",
@@ -372,11 +376,11 @@ app.post("/api/pdf", async (req, res) => {
     vesselDepartureDate: vesselDepartureDate || "02.03.2026 18:00:00",
     vesselVoyage: vesselVoyage || "MAREN MAERSK/608E",
 
-    placeOfReceipt: placeOfReceipt || (pickupLocation || "Bremerhaven Port , UK"),
+    placeOfReceipt: placeOfReceipt || (pickupLocation || "Woerth a Rhein, Rhineland Palatinate, Germany"),
     portOfLoading: portOfLoading || "NLROT - APM 2 Terminal Maasvlakte II, Rotterdam, Netherlands",
     nextPort: nextPort || "Pelabuhan Tanjung Pelepas Terminal, Malaysia",
     portOfDischarge: portOfDischarge || "Tianjin PAC Intl Cntr Terminal, China",
-    placeOfDelivery: placeOfDelivery || (deliveryLocation || "Hamburg DC"),
+    placeOfDelivery: placeOfDelivery || (deliveryLocation || "Xingang, Tianjin, China"),
 
     equipmentType: equipmentType || `40 DRY 9'6"`,
     containerSeal: containerSeal || "TSK6018425",
@@ -391,18 +395,18 @@ app.post("/api/pdf", async (req, res) => {
     hsCode: hsCode || "870829",
     bondedGoods: bondedGoods || "No",
 
-    stageFrom: stageFrom || (pickupLocation || "Bremerhaven Port , UK"),
-    stageTo: stageTo || (deliveryLocation || "Hamburg DC"),
+    stageFrom: stageFrom || (pickupLocation || "Contargo Woerth / HAFENSTR. 1 / Woerth a Rhein / DE"),
+    stageTo: stageTo || (deliveryLocation || "APM 2 Terminal Maasvlakte II / Europaweg 910 / Rotterdam / NL"),
     appointmentFrom: appointmentFrom || "23.02.2026 07:00:00",
     appointmentTo: appointmentTo || "25.02.2026 14:21:35",
 
     totalCost: totalCost || "463,80 EUR",
     detailedCostLine1: detailedCostLine1 || "Barge 389,00 EUR",
     detailedCostLine2: detailedCostLine2 || "Intermodal Fuel Surcharge 74,80 EUR",
-
     remarks: remarks || "—"
   };
 
+  // Response headers
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader(
     "Content-Disposition",
@@ -418,170 +422,145 @@ app.post("/api/pdf", async (req, res) => {
 
   const thin = () => doc.strokeColor("#000").lineWidth(0.6);
   const box = (x, y, w, h) => { thin(); doc.rect(x, y, w, h).stroke(); };
-  const hline = (x1, y, x2) => { thin(); doc.moveTo(x1, y).lineTo(x2, y).stroke(); };
+  const hline = (y) => { thin(); doc.moveTo(L, y).lineTo(R, y).stroke(); };
 
-  const t = (s, x, y, size = 9, bold = false, opts = {}) => {
-    doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(size).fillColor("#000").text(String(s ?? ""), x, y, opts);
+  const txt = (s, x, y, size = 9, bold = false, opts = {}) => {
+    doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(size).fillColor("#000")
+      .text(String(s ?? ""), x, y, opts);
   };
 
-  // Label + value like sample: label left, value bold (often right-aligned)
-  const kv = (label, value, x, y, labelW, valueW, alignValueRight = false) => {
-    t(label, x, y, 9, true, { width: labelW });
-    t(
-      value,
-      x + labelW,
-      y,
-      9,
-      false,
-      { width: valueW, align: alignValueRight ? "right" : "left" }
-    );
+  // label + value (sample style): label bold, value normal, aligned column
+  const row = (label, value, xLabel, xValue, y, valueWidth) => {
+    txt(label, xLabel, y, 9, true, { width: xValue - xLabel - 6 });
+    txt(value, xValue, y, 9, false, { width: valueWidth, lineBreak: false, ellipsis: true });
   };
 
   // ===================== PAGE 1 =====================
-  // Dispatcher line
-  t(
-    `Dispatcher: ${d.dispatcher}     Dispatcher phone: ${d.dispatcherPhone}     Dispatcher email: ${d.dispatcherEmail}     System date: ${d.systemDate}`,
+  // top dispatcher line
+  txt(
+    `Dispatcher: ${d.dispatcher}        Dispatcher phone: ${d.dispatcherPhone}        Dispatcher email: ${d.dispatcherEmail}        System date: ${d.systemDate}`,
     L,
     18,
     8,
     false
   );
 
-  // Logo placeholder (since we don’t have image file). If you add an image later, swap this.
-  box(L, 52, 40, 40);
-  t("MAERSK", L + 6, 67, 9, true);
+  // logo placeholder + title centered (sample has logo left, title centered)
+  box(L + 6, 60, 26, 26);
+  txt("M", L + 15, 66, 14, true);
+  txt("Export Work Order", L, 62, 22, true, { width: W, align: "center" });
 
-  // Title centered
-  t("Export Work Order", L, 60, 22, true, { width: W, align: "center" });
-  t("Page 1 of 2", R - 90, 785, 9, false);
+  // Left section positions (match sample layout)
+  const xLabelL = L + 70;
+  const xValueL = L + 220;
 
-  // Transport By label + address box
-  t("Transport By", L, 130, 9, true);
-  const addrX = L + 90;
-  const addrY = 120;
-  const addrW = 280;
-  const addrH = 70;
-  box(addrX, addrY, addrW, addrH);
-  t(d.transportByName, addrX + 10, addrY + 10, 10, true);
-  t(d.transportByStreet, addrX + 10, addrY + 26, 9);
-  t(d.transportByCity, addrX + 10, addrY + 40, 9);
-  t(d.transportByCountry, addrX + 10, addrY + 54, 9);
+  // Right section positions
+  const xLabelR = L + 360;
+  const xValueR = L + 540;
 
-  // Left small list (Booking/BL/Customer) like sample
-  const leftListY = 200;
-  kv("Booking Number", d.bookingNumber, L, leftListY, 140, 160, false);
-  kv("B/L Number", d.blNumber, L, leftListY + 18, 140, 160, false);
-  kv("Customer Name", d.customerName, L, leftListY + 36, 140, 200, false);
+  // Transport by block (left)
+  txt("Transport By", xLabelL, 210, 9, true);
+  txt(d.transportByName, xValueL, 200, 9, true);
+  txt(d.transportByStreet, xValueL, 214, 9, false);
+  txt(d.transportByCity, xValueL, 228, 9, false);
+  txt(d.transportByCountry, xValueL, 242, 9, false);
 
-  // Right details list (WO/Fwd/Mode/Carrier/Move/Dates/Voyage/Places) like sample
-  const rightColX = L + 330;
-  const rightY = 140;
-  const labelW = 170;
-  const valueW = 210;
+  // Booking / BL / Customer (left list)
+  row("Booking Number", d.bookingNumber, xLabelL, xValueL, 270, 260);
+  row("B/L Number", d.blNumber, xLabelL, xValueL, 288, 260);
+  row("Customer Name", d.customerName, xLabelL, xValueL, 306, 260);
 
-  kv("Work Order Number", d.workOrderNumber, rightColX, rightY, labelW, valueW, true);
-  kv("Forwarding Order Number", d.forwardingOrderNumber, rightColX, rightY + 18, labelW, valueW, true);
-  kv("Transport Mode", d.transportMode, rightColX, rightY + 36, labelW, valueW, true);
-  kv("Ocean Carrier", d.oceanCarrier, rightColX, rightY + 54, labelW, valueW, true);
-  kv("Move Type", d.moveType, rightColX, rightY + 72, labelW, valueW, true);
-  kv("Earliest Port Receipt Date", d.earliestPortReceiptDate, rightColX, rightY + 90, labelW, valueW, true);
-  kv("Vessel Cutoff Date", d.vesselCutoffDate, rightColX, rightY + 108, labelW, valueW, true);
-  kv("Vessel Departure Date", d.vesselDepartureDate, rightColX, rightY + 126, labelW, valueW, true);
-  kv("Vessel/Voyage", d.vesselVoyage, rightColX, rightY + 144, labelW, valueW, true);
-  kv("Place of Receipt", d.placeOfReceipt, rightColX, rightY + 162, labelW, valueW, true);
-  kv("Port of Loading", d.portOfLoading, rightColX, rightY + 180, labelW, valueW, true);
-  kv("Next Port", d.nextPort, rightColX, rightY + 198, labelW, valueW, true);
-  kv("Port of Discharge", d.portOfDischarge, rightColX, rightY + 216, labelW, valueW, true);
-  kv("Place of Delivery", d.placeOfDelivery, rightColX, rightY + 234, labelW, valueW, true);
+  // Right list (like sample)
+  row("Work Order Number", d.workOrderNumber, xLabelR, xValueR, 200, 220);
+  row("Forwarding Order Number", d.forwardingOrderNumber, xLabelR, xValueR, 218, 220);
 
-  // Equipment and Cargo Details header with lines (like sample)
-  const eHeadY = 402;
-  hline(L, eHeadY, R);
-  t("Equipment and Cargo Details", L, eHeadY + 4, 11, true, { width: W, align: "center" });
-  hline(L, eHeadY + 22, R);
+  row("Transport Mode", d.transportMode, xLabelR, xValueR, 246, 220);
+  row("Ocean Carrier", d.oceanCarrier, xLabelR, xValueR, 264, 220);
+  row("Move Type", d.moveType, xLabelR, xValueR, 282, 220);
 
-  // Equipment table box
-  const eqY = eHeadY + 28;
-  const eqH = 72;
-  box(L, eqY, W, eqH);
+  row("Earliest Port Receipt Date", d.earliestPortReceiptDate, xLabelR, xValueR, 310, 220);
+  row("Vessel Cutoff Date", d.vesselCutoffDate, xLabelR, xValueR, 328, 220);
+  row("Vessel Departure Date", d.vesselDepartureDate, xLabelR, xValueR, 346, 220);
+  row("Vessel/Voyage", d.vesselVoyage, xLabelR, xValueR, 364, 220);
 
-  // Column positions (match sample style)
-  const c1 = L + 10;
-  const c2 = L + 200;
-  const c3 = L + 340;
-  const c4 = L + 440;
+  row("Place of Receipt", d.placeOfReceipt, xLabelR, xValueR, 392, 220);
+  row("Port of Loading", d.portOfLoading, xLabelR, xValueR, 410, 220);
+  row("Next Port", d.nextPort, xLabelR, xValueR, 428, 220);
+  row("Port of Discharge", d.portOfDischarge, xLabelR, xValueR, 446, 220);
+  row("Place of Delivery", d.placeOfDelivery, xLabelR, xValueR, 464, 220);
 
-  t("Equipment Type", c1, eqY + 8, 9, true);
-  t("Container Seal", c2, eqY + 8, 9, true);
-  t("Tare", c3, eqY + 8, 9, true);
-  t("Total Weight", c4, eqY + 8, 9, true);
-  hline(L, eqY + 24, R);
+  // Equipment & Cargo header with lines (sample)
+  hline(510);
+  txt("Equipment and Cargo Details", L, 516, 11, true, { width: W, align: "center" });
+  hline(534);
 
-  t(d.equipmentType, c1, eqY + 34, 9);
-  t(d.containerSeal, c2, eqY + 34, 9);
-  t(d.tareWeight, c3, eqY + 34, 9);
-  t(d.totalWeight, c4, eqY + 34, 9);
+  // Equipment table (sample style)
+  const eqTop = 548;
+  txt("Equipment Type", L + 30, eqTop, 9, true);
+  txt("Container", L + 220, eqTop, 9, true);
+  txt("Seal", L + 320, eqTop, 9, true);
+  txt("Tare", L + 420, eqTop, 9, true);
+  txt("Total Weight", L + 500, eqTop, 9, true);
 
-  // Cargo details block (like sample: cargo description row + table)
-  const cargoY = eqY + eqH + 12;
-  t("Cargo details", L, cargoY, 9, true);
+  txt(d.equipmentType, L + 30, eqTop + 18, 9, false);
+  txt("", L + 220, eqTop + 18, 9, false);
+  txt(d.containerSeal, L + 320, eqTop + 18, 9, false);
+  txt(d.tareWeight, L + 420, eqTop + 18, 9, false);
+  txt(d.totalWeight, L + 500, eqTop + 18, 9, false);
 
-  // Cargo description row
-  const cdY = cargoY + 14;
-  box(L, cdY, W, 26);
-  t("Cargo Description:", L + 10, cdY + 7, 9, true);
-  t(d.cargoDescription, L + 140, cdY + 7, 9);
+  // Cargo details block with borders like sample
+  txt("Cargo details", L + 12, 598, 9, true);
 
-  // Package table
-  const pY = cdY + 26;
-  const pH = 44;
-  box(L, pY, W, pH);
-  // vertical lines to mimic sample
-  const v1 = L + 300;
-  const v2 = L + 350;
-  const v3 = L + 450;
-  const v4 = L + 560;
-  hline(L, pY + 20, R);
-  thin(); doc.moveTo(v1, pY).lineTo(v1, pY + pH).stroke();
-  thin(); doc.moveTo(v2, pY).lineTo(v2, pY + pH).stroke();
-  thin(); doc.moveTo(v3, pY).lineTo(v3, pY + pH).stroke();
-  thin(); doc.moveTo(v4, pY).lineTo(v4, pY + pH).stroke();
+  // Cargo description row (border)
+  box(L + 10, 614, W - 20, 22);
+  txt("Cargo Description:", L + 18, 620, 9, true);
+  txt(d.cargoDescription, L + 150, 620, 9, false);
 
-  t("Package Description", L + 10, pY + 5, 9, true);
-  t("Package QTY", v1 + 8, pY + 5, 9, true);
-  t("Weight", v2 + 8, pY + 5, 9, true);
-  t("Unit of Measurement", v3 + 8, pY + 5, 9, true);
-  t("HS Code", v4 + 8, pY + 5, 9, true);
+  // Package header table (bordered)
+  box(L + 10, 636, W - 20, 52);
+  thin(); doc.moveTo(L + 10, 656).lineTo(R - 10, 656).stroke();
 
-  t(d.packageDescription, L + 120, pY + 26, 9);
-  t(d.packageQty, v1 + 20, pY + 26, 9);
-  t(d.packageWeight, v2 + 20, pY + 26, 9);
-  t(d.packageUom, v3 + 40, pY + 26, 9);
-  t(d.hsCode, v4 + 20, pY + 26, 9);
+  // vertical lines
+  const v1 = L + 290, v2 = L + 350, v3 = L + 450, v4 = L + 560;
+  thin(); doc.moveTo(v1, 636).lineTo(v1, 688).stroke();
+  thin(); doc.moveTo(v2, 636).lineTo(v2, 688).stroke();
+  thin(); doc.moveTo(v3, 636).lineTo(v3, 688).stroke();
+  thin(); doc.moveTo(v4, 636).lineTo(v4, 688).stroke();
 
-  // Bonded goods line
-  t("Bonded Goods", L, pY + pH + 12, 9, false);
-  t(d.bondedGoods, L + 120, pY + pH + 12, 9, false);
+  txt("Package Description", L + 20, 642, 9, true);
+  txt("Package QTY", v1 + 10, 642, 9, true);
+  txt("Weight", v2 + 10, 642, 9, true);
+  txt("Unit of\nMeasurement", v3 + 10, 640, 9, true);
+  txt("HS Code", v4 + 10, 642, 9, true);
 
-  // Stage table (like sample)
-  const stY = pY + pH + 44;
-  box(L, stY, W, 110);
-  // header
-  hline(L, stY + 22, R);
-  t("Stage", L + 10, stY + 6, 9, true);
-  t("From", L + 140, stY + 6, 9, true);
-  t("To", L + 420, stY + 6, 9, true);
+  txt(d.packageDescription, L + 140, 664, 9, false);
+  txt(d.packageQty, v1 + 20, 664, 9, false);
+  txt(d.packageWeight, v2 + 20, 664, 9, false);
+  txt(d.packageUom, v3 + 40, 664, 9, false);
+  txt(d.hsCode, v4 + 20, 664, 9, false);
 
-  // row content
-  t("1", L + 16, stY + 32, 9, false);
-  t(d.stageFrom, L + 140, stY + 32, 9, false, { width: 250 });
-  t(d.stageTo, L + 420, stY + 32, 9, false, { width: 240 });
+  txt("Bonded Goods", L + 12, 704, 9, false);
+  txt(d.bondedGoods, L + 130, 704, 9, false);
 
-  t(`Appointment Arrival: ${d.appointmentFrom}`, L + 140, stY + 72, 9, false);
-  t(`Appointment Arrival: ${d.appointmentTo}`, L + 420, stY + 72, 9, false);
+  // Stage table (bordered) like sample
+  const stTop = 734;
+  box(L + 10, stTop, W - 20, 90);
+  thin(); doc.moveTo(L + 10, stTop + 22).lineTo(R - 10, stTop + 22).stroke();
 
-  // Total cost
-  t(`Total cost ${d.totalCost}`, L, stY + 128, 10, true);
+  txt("Stage", L + 20, stTop + 6, 9, true);
+  txt("From", L + 160, stTop + 6, 9, true);
+  txt("To", L + 430, stTop + 6, 9, true);
+
+  txt("1", L + 24, stTop + 32, 9, true);
+  txt(d.stageFrom, L + 160, stTop + 32, 9, false, { width: 240 });
+  txt(d.stageTo, L + 430, stTop + 32, 9, false, { width: 240 });
+
+  txt(`Appointment Arrival: ${d.appointmentFrom}`, L + 160, stTop + 64, 9, false);
+  txt(`Appointment Arrival: ${d.appointmentTo}`, L + 430, stTop + 64, 9, false);
+
+  txt(`Total cost ${d.totalCost}`, L + 10, 840, 10, true);
+
+  txt("Page 1 of 2", R - 90, 840, 9, false);
 
   // ===================== PAGE 2 =====================
   doc.addPage();
@@ -590,67 +569,70 @@ app.post("/api/pdf", async (req, res) => {
   const R2 = doc.page.width - doc.page.margins.right;
   const W2 = R2 - L2;
 
-  // Header line + title
-  t(
-    `Dispatcher: ${d.dispatcher}     Dispatcher phone: ${d.dispatcherPhone}     Dispatcher email: ${d.dispatcherEmail}     System date: ${new Date().toLocaleString("en-GB").replace(",", "")}`,
+  const box2 = (x, y, w, h) => { doc.strokeColor("#000").lineWidth(0.6); doc.rect(x, y, w, h).stroke(); };
+  const txt2 = (s, x, y, size = 9, bold = false, opts = {}) => {
+    doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(size).fillColor("#000")
+      .text(String(s ?? ""), x, y, opts);
+  };
+
+  txt2(
+    `Dispatcher: ${d.dispatcher}        Dispatcher phone: ${d.dispatcherPhone}        Dispatcher email: ${d.dispatcherEmail}        System date: ${new Date().toLocaleString("en-GB").replace(",", "")}`,
     L2,
     18,
     8,
     false
   );
-  t("Export Work Order", L2, 52, 26, true);
-  t("Page 2 of 2", R2 - 90, 60, 9, false);
+  txt2("Export Work Order", L2, 52, 26, true);
+  txt2("Page 2 of 2", R2 - 90, 60, 9, false);
 
-  // Detailed cost box
-  t("Detailed Cost", L2, 110, 14, true);
-  box(L2, 130, W2, 68);
-  t(d.detailedCostLine1, L2 + 12, 146, 12, false);
-  t(d.detailedCostLine2, L2 + 12, 168, 12, false);
+  // Detailed cost
+  txt2("Detailed Cost", L2, 110, 14, true);
+  box2(L2, 130, W2, 68);
+  txt2(d.detailedCostLine1, L2 + 16, 146, 12, false);
+  txt2(d.detailedCostLine2, L2 + 16, 168, 12, false);
 
-  // Milestone update (Tap buttons) - FIXED so DELAY is not weird
-  t("Milestone Update (Tap buttons)", L2, 220, 14, true);
-  box(L2, 242, W2, 132);
+  // Milestone Update
+  txt2("Milestone Update (Tap buttons)", L2, 220, 14, true);
+  box2(L2, 242, W2, 132);
 
   const mx = L2 + 14;
   const mw = W2 - 28;
   const mh = 30;
 
-  // Each button box is a link
   const tap = (label, url, y) => {
-    box(mx, y, mw, mh);
+    box2(mx, y, mw, mh);
     doc.link(mx, y, mw, mh, url);
-    t(label, mx + 10, y + 9, 12, true);
+    txt2(label, mx + 10, y + 8, 12, true);
   };
 
   tap(`PICK UP (from ${pickupLocation || d.placeOfReceipt})`, pickupUrl, 254);
   tap(`DELIVERED (at ${deliveryLocation || d.placeOfDelivery})`, deliveredUrl, 290);
   tap("DELAY (reason page)", delayUrl, 326);
 
-  // Note BELOW the box (no overlap)
-  t("If location is blocked, event still submits (without GPS).", L2, 380, 9, false);
+  // ✅ FIX: note goes OUTSIDE the box (no overlap)
+  txt2("If location is blocked, event still submits (without GPS).", L2, 380, 9, false);
 
-  // QR section with TWO QRs SIDE BY SIDE in a single boundary box
-  t("Scan QR Codes", L2, 420, 14, true);
-  box(L2, 442, W2, 290);
+  // QRs side-by-side inside one boundary
+  txt2("Scan QR Codes", L2, 420, 14, true);
+  box2(L2, 442, W2, 290);
 
   const qrSize = 190;
   const qy = 480;
   const qx1 = L2 + 40;
   const qx2 = L2 + 320;
 
-  // Labels
-  t("Driver page", qx1, 456, 11, true);
-  t("WhatsApp (share order)", qx2, 456, 11, true);
+  txt2("Driver page", qx1, 456, 11, true);
+  txt2("WhatsApp (share order)", qx2, 456, 11, true);
 
   doc.image(driverQrPng, qx1, qy, { fit: [qrSize, qrSize] });
   doc.image(whatsappQrPng, qx2, qy, { fit: [qrSize, qrSize] });
 
-  t(`WhatsApp to +44 7345 485597 with: "Order ${orderNumber}"`, qx2, qy + qrSize + 14, 10, false);
+  txt2(`WhatsApp to +44 7345 485597 with: "Order ${orderNumber}"`, qx2, qy + qrSize + 14, 10, false);
 
   // Remarks
-  t("Remarks", L2, 748, 14, true);
-  box(L2, 770, W2, 44);
-  t(d.remarks, L2 + 12, 782, 10, false, { width: W2 - 24 });
+  txt2("Remarks", L2, 748, 14, true);
+  box2(L2, 770, W2, 44);
+  txt2(d.remarks, L2 + 12, 782, 10, false, { width: W2 - 24 });
 
   doc.end();
 });
