@@ -463,7 +463,7 @@ app.post("/api/pdf", async (req, res) => {
   doc.font("Helvetica-Bold").fontSize(10).fillColor("#0f172a").text("Share via WhatsApp", rightX, y);
   doc.image(whatsappQrPng, rightX, y + 14, { fit: [qrSize, qrSize] });
   doc.font("Helvetica").fontSize(8).fillColor("#64748b")
-    .text(`Opens WhatsApp to +44 7345 485597 with message:\n"${orderNumber}"`, rightX, y + 14 + qrSize + 6, { width: qrSize });
+    .text(`Opens WhatsApp to +44 7345485597 with message:\n"${orderNumber}"`, rightX, y + 14 + qrSize + 6, { width: qrSize });
 
   y = y + 14 + qrSize + 42;
 
