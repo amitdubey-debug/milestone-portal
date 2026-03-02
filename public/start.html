@@ -19,7 +19,7 @@
                   var(--bg);
       color:var(--text);
     }
-    .wrap{max-width:760px;margin:18px auto;padding:14px}
+    .wrap{max-width:680px;margin:18px auto;padding:14px}
     .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px}
     h1{margin:0;font-size:18px}
     .muted{color:var(--muted);font-size:13px;margin-top:6px;line-height:1.35}
@@ -29,8 +29,6 @@
       width:100%;padding:12px;border-radius:14px;border:1px solid var(--border);
       font-size:14px;outline:none;background:#fff;
     }
-    .row{display:grid;grid-template-columns:1fr;gap:12px}
-    @media(min-width:760px){ .row{grid-template-columns:1fr 1fr} }
     .btn{
       border:0;border-radius:16px;padding:12px 14px;cursor:pointer;font-weight:900;letter-spacing:.2px;
       color:#fff;box-shadow:var(--shadow2);
@@ -51,10 +49,9 @@
 <body>
   <div class="wrap">
     <div class="card">
-      <h1>Start Tracking (No Token)</h1>
+      <h1>Open Driver Page</h1>
       <div class="muted">
-        Enter the Order Number and any one verification field (Pickup/Drop/Vendor Code/Phone).
-        We’ll generate a token and open the same driver page.
+        Enter the Order Number. We’ll generate a token and open the driver update page.
       </div>
 
       <div class="grid">
@@ -63,37 +60,17 @@
           <input id="orderNumber" placeholder="e.g. 686868678687" />
         </div>
 
-        <div class="row">
-          <div class="field">
-            <label>Pickup Location (optional)</label>
-            <input id="pickupLocation" placeholder="e.g. Bremerhaven Port" />
-          </div>
-          <div class="field">
-            <label>Drop/Delivery Location (optional)</label>
-            <input id="deliveryLocation" placeholder="e.g. Hamburg DC" />
-          </div>
-        </div>
-
-        <div class="row">
-          <div class="field">
-            <label>Vendor Code (optional)</label>
-            <input id="vendorCode" placeholder="e.g. DE12345" />
-          </div>
-          <div class="field">
-            <label>Driver Phone (optional)</label>
-            <input id="phone" placeholder="+49..." />
-          </div>
-        </div>
-
         <div class="field">
           <label>Token TTL Minutes (optional)</label>
           <input id="ttl" placeholder="e.g. 1440 (1 day)" />
         </div>
 
-        <button class="btn" id="goBtn">Generate Link & Open</button>
+        <button class="btn" id="goBtn">Open</button>
 
         <div class="status" id="status">Ready.</div>
-        <div class="note">Tip: For production, you’d verify these values against an order system before issuing a token.</div>
+        <div class="note">
+          For production: you’d verify order ownership before issuing a token.
+        </div>
       </div>
     </div>
   </div>
@@ -110,37 +87,25 @@
 
   goBtn.addEventListener("click", async () => {
     const orderNumber = document.getElementById("orderNumber").value.trim();
-    const pickupLocation = document.getElementById("pickupLocation").value.trim();
-    const deliveryLocation = document.getElementById("deliveryLocation").value.trim();
-    const vendorCode = document.getElementById("vendorCode").value.trim();
-    const phone = document.getElementById("phone").value.trim();
-    const ttlMinutes = document.getElementById("ttl").value.trim();
+    const ttlMinutesRaw = document.getElementById("ttl").value.trim();
 
     if (!orderNumber) return setStatus("Order Number is required.", "err");
-    if (!pickupLocation && !deliveryLocation && !vendorCode && !phone) {
-      return setStatus("Provide at least one verification field: pickup/drop/vendor code/phone.", "err");
-    }
+
+    const ttlMinutes = ttlMinutesRaw ? Number(ttlMinutesRaw) : undefined;
+    if (ttlMinutesRaw && !Number.isFinite(ttlMinutes)) return setStatus("TTL must be a number.", "err");
 
     setStatus("Generating…");
 
     const r = await fetch("/api/start", {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({
-        orderNumber,
-        pickupLocation,
-        deliveryLocation,
-        vendorCode,
-        phone,
-        ttlMinutes: ttlMinutes ? Number(ttlMinutes) : undefined
-      })
+      body: JSON.stringify({ orderNumber, ttlMinutes })
     });
 
     const data = await r.json().catch(() => ({}));
     if (!r.ok) return setStatus(data.error || "Failed", "err");
 
-    setStatus(`Link created: <a href="${data.link}">${data.link}</a>`, "ok");
-    // open
+    setStatus(`Opening: <a href="${data.link}">${data.link}</a>`, "ok");
     window.location.href = data.link;
   });
 </script>

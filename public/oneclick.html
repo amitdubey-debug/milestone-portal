@@ -114,7 +114,10 @@
       <div class="hdr">
         <div>
           <h1>Milestone Update</h1>
-          <div class="muted" id="sub">Tap an update below. If GPS is OFF, we still send the event (without GPS).</div>
+          <div class="muted" id="sub">
+            Pick up / Delivered / Delay can be submitted without GPS.
+            <b>Start tracking requires GPS permission.</b>
+          </div>
         </div>
         <div class="pill" id="orderPill">Order: —</div>
       </div>
@@ -125,9 +128,9 @@
 
       <div class="banner">
         <div>
-          <strong>Keep this tab open for tracking</strong>
+          <strong>GPS tracking (requires location ON)</strong>
           <small>
-            After start tracking, GPS pings are sent every <b>5 seconds</b> while this page is active.
+            After you start tracking, GPS pings are sent every <b>5 seconds</b> while this page is active.
             If your phone locks, pings may pause — opening this page again triggers an immediate ping.
           </small>
         </div>
@@ -138,7 +141,7 @@
       </div>
 
       <div class="locHelp" id="locHelp">
-        <strong>Location is OFF / blocked (optional but recommended)</strong>
+        <strong>Location is OFF / blocked</strong>
         <div class="tips" id="locTips"></div>
       </div>
 
@@ -204,7 +207,6 @@
   const token = url.searchParams.get("token");
   const type = url.searchParams.get("type"); // optional: PICKED_UP | DELIVERED | DELAY
 
-  const sub = document.getElementById("sub");
   const statusEl = document.getElementById("status");
   const pingInfo = document.getElementById("pingInfo");
 
@@ -243,22 +245,15 @@
   }
 
   function showLocHelp(show) {
-    if (!show) {
-      locHelp.classList.remove("show");
-      return;
-    }
+    if (!show) { locHelp.classList.remove("show"); return; }
     locHelp.classList.add("show");
     locTips.innerHTML = `
-      <div><b>We can still submit without GPS</b>, but GPS improves tracking.</div>
-      <div style="margin-top:8px;"><b>Enable location:</b></div>
-      <div style="margin-top:4px;">
-        <b>iPhone:</b> Settings → Privacy & Security → Location Services → ON,
-        then Settings → Safari → Location → Allow.
-      </div>
-      <div style="margin-top:4px;">
-        <b>Android:</b> Settings → Location → ON, then Chrome → Site settings → Location → Allow.
-      </div>
-      <div style="margin-top:6px;">Then come back and tap again.</div>
+      <div style="margin-bottom:6px;"><b>Tracking needs GPS permission.</b></div>
+      <div><b>iPhone:</b> Settings → Privacy & Security → Location Services → ON,
+      then Settings → Safari → Location → Allow.</div>
+      <div style="margin-top:4px;"><b>Android:</b> Settings → Location → ON,
+      then Chrome → Site settings → Location → Allow.</div>
+      <div style="margin-top:6px;">Return here and tap again.</div>
     `;
   }
 
@@ -276,23 +271,15 @@
     return localStorage.getItem(TRACK_KEY) === "1";
   }
 
+  // Try GPS; if blocked/off => return null
   async function tryGetGeo() {
-    // Do NOT block submissions if GPS fails.
     showLocHelp(false);
-
-    if (!navigator.geolocation) {
-      showLocHelp(true);
-      return null;
-    }
+    if (!navigator.geolocation) return null;
 
     return new Promise((resolve) => {
       navigator.geolocation.getCurrentPosition(
         (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy }),
-        () => {
-          // No prompt again if user blocked; we show path and continue without geo.
-          showLocHelp(true);
-          resolve(null);
-        },
+        () => resolve(null),
         { enableHighAccuracy: true, timeout: 7000, maximumAge: 0 }
       );
     });
@@ -307,6 +294,14 @@
     if (!isTrackingEnabled()) return;
 
     const geo = await tryGetGeo();
+    // Tracking MUST have geo; if not, stop tracking and tell user
+    if (!geo) {
+      setTrackingEnabled(false);
+      stopAutoTracking();
+      showLocHelp(true);
+      setStatus("Tracking not started/stopped: please enable location permission.", "err");
+      return;
+    }
 
     await fetch("/api/ping", {
       method: "POST",
@@ -316,17 +311,13 @@
 
     lastPingAt = new Date();
     updatePingInfo(source);
-
-    if (!geo) setStatus("Tracking ping sent (without GPS). Please enable Location Services.", "warn");
   }
 
   function startAutoTracking() {
     if (pingTimer) return;
 
-    // immediate ping
     sendPingOnce("start");
 
-    // every 5 seconds while active
     pingTimer = setInterval(() => sendPingOnce("interval"), 5000);
 
     const resume = (src) => {
@@ -345,11 +336,11 @@
     pingInfo.textContent = "";
   }
 
+  // Milestones CAN be submitted without GPS
   async function submitMilestone(milestoneType, delayReason, delayNotes) {
     if (!token) return setStatus("Invalid link.", "err");
 
-    const geo = await tryGetGeo();
-
+    const geo = await tryGetGeo(); // may be null
     setStatus("Sending update…");
 
     const r = await fetch("/api/submit", {
@@ -361,10 +352,10 @@
     const data = await r.json().catch(() => ({}));
     if (!r.ok) return setStatus(data.error || "Submit failed", "err");
 
-    if (geo) {
-      setStatus("Submitted ✅ Thank you!", "ok");
-    } else {
-      setStatus("Submitted ✅ (without GPS). Please enable Location Services.", "warn");
+    if (geo) setStatus("Submitted ✅ Thank you!", "ok");
+    else {
+      setStatus("Submitted ✅ (without GPS). Please enable Location Services if possible.", "warn");
+      showLocHelp(true);
     }
 
     if (milestoneType === "DELAY") {
@@ -389,12 +380,10 @@
   pickupBtn.addEventListener("click", () => submitMilestone("PICKED_UP"));
   deliveredBtn.addEventListener("click", () => submitMilestone("DELIVERED"));
 
-  delayBtn.addEventListener("click", async () => {
-    // No blocking — just open panel; GPS will be captured on submit
+  delayBtn.addEventListener("click", () => {
     delayPanel.classList.add("show");
     setStatus("Select delay reason and submit.");
   });
-
   closeDelayBtn.addEventListener("click", () => delayPanel.classList.remove("show"));
 
   delaySubmitBtn.addEventListener("click", () => {
@@ -402,13 +391,26 @@
     submitMilestone("DELAY", reason.value, notes.value);
   });
 
+  // IMPORTANT: Start tracking MUST have location
   startTrackingBtn.addEventListener("click", async () => {
+    const geo = await tryGetGeo();
+    if (!geo) {
+      showLocHelp(true);
+      return setStatus("Please enable Location Services to start tracking.", "err");
+    }
+
     setTrackingEnabled(true);
     setStatus("Tracking started ✅", "ok");
     startAutoTracking();
 
-    // fire immediate ping; geo may be null (still stored)
-    await sendPingOnce("start-click");
+    // immediate ping tagged
+    await fetch("/api/ping", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, geo, pingSource: "start-click" })
+    }).catch(() => {});
+    lastPingAt = new Date();
+    updatePingInfo("start-click");
   });
 
   stopTrackingBtn.addEventListener("click", () => {
@@ -423,15 +425,30 @@
       await loadContext();
 
       setTrackingUI(isTrackingEnabled());
+
+      // if tracking enabled earlier, try to resume; if no geo => disable
       if (isTrackingEnabled()) {
-        setStatus("Tracking is ON. Keep this page open.", "ok");
-        startAutoTracking();
-        sendPingOnce("open-resume");
+        const geo = await tryGetGeo();
+        if (!geo) {
+          setTrackingEnabled(false);
+          showLocHelp(true);
+          setStatus("Tracking was ON but GPS is blocked. Enable location to resume tracking.", "err");
+        } else {
+          setStatus("Tracking is ON. Keep this page open.", "ok");
+          startAutoTracking();
+          await fetch("/api/ping", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token, geo, pingSource: "open-resume" })
+          }).catch(() => {});
+          lastPingAt = new Date();
+          updatePingInfo("open-resume");
+        }
       } else {
         setStatus("Ready.");
       }
 
-      // Auto-submit if opened with type param (from QR/other)
+      // Auto-submit if opened with type param
       if (type === "PICKED_UP") submitMilestone("PICKED_UP");
       else if (type === "DELIVERED") submitMilestone("DELIVERED");
       else if (type === "DELAY") {

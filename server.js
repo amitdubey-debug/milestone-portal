@@ -39,9 +39,7 @@ function readMilestones() {
   try { return JSON.parse(fs.readFileSync(MILESTONES_FILE, "utf8")); }
   catch { return []; }
 }
-function writeMilestones(all) {
-  fs.writeFileSync(MILESTONES_FILE, JSON.stringify(all, null, 2));
-}
+function writeMilestones(all) { fs.writeFileSync(MILESTONES_FILE, JSON.stringify(all, null, 2)); }
 function appendMilestone(record) {
   const all = readMilestones();
   all.push(record);
@@ -52,9 +50,7 @@ function readShortlinks() {
   try { return JSON.parse(fs.readFileSync(SHORTLINKS_FILE, "utf8")); }
   catch { return {}; }
 }
-function writeShortlinks(obj) {
-  fs.writeFileSync(SHORTLINKS_FILE, JSON.stringify(obj, null, 2));
-}
+function writeShortlinks(obj) { fs.writeFileSync(SHORTLINKS_FILE, JSON.stringify(obj, null, 2)); }
 function createShortCode(token) {
   const map = readShortlinks();
   const code = nanoid(8);
@@ -149,27 +145,12 @@ app.post("/api/link", async (req, res) => {
   res.json({ token, link, shortLanding, qrDataUrl, dashboard, expiresInMinutes: effectiveTtl });
 });
 
-/**
- * NEW: no-token start flow
- * User provides orderNumber + at least one "verification" field.
- * For demo we accept it and mint a token, then redirect to oneclick.
- */
+// NEW: Only orderNumber
 app.post("/api/start", (req, res) => {
-  const { orderNumber, pickupLocation, deliveryLocation, vendorCode, phone, ttlMinutes } = req.body || {};
+  const { orderNumber, ttlMinutes } = req.body || {};
   if (!orderNumber) return res.status(400).json({ error: "orderNumber is required" });
 
-  const hasAny = Boolean(
-    (pickupLocation && String(pickupLocation).trim()) ||
-    (deliveryLocation && String(deliveryLocation).trim()) ||
-    (vendorCode && String(vendorCode).trim()) ||
-    (phone && String(phone).trim())
-  );
-  if (!hasAny) {
-    return res.status(400).json({ error: "Provide at least one: pickupLocation, deliveryLocation, vendorCode, phone" });
-  }
-
-  // For demo: use provided pickup/delivery if present, else defaults.
-  const { token } = mintToken({ orderNumber, pickupLocation, deliveryLocation, ttlMinutes });
+  const { token } = mintToken({ orderNumber, ttlMinutes });
 
   const baseUrl = baseUrlFromReq(req);
   const link = `${baseUrl}/oneclick?token=${encodeURIComponent(token)}`;
@@ -232,11 +213,8 @@ app.post("/api/submit", (req, res) => {
   if (!token || !milestoneType) return res.status(400).json({ error: "token and milestoneType are required" });
 
   let decoded;
-  try {
-    decoded = jwt.verify(token, JWT_SECRET);
-  } catch {
-    return res.status(401).json({ error: "Invalid/expired token" });
-  }
+  try { decoded = jwt.verify(token, JWT_SECRET); }
+  catch { return res.status(401).json({ error: "Invalid/expired token" }); }
 
   if (!decoded.allowedMilestones?.includes(milestoneType)) {
     return res.status(403).json({ error: "Milestone not allowed" });
@@ -249,9 +227,7 @@ app.post("/api/submit", (req, res) => {
   let cleanGeo = null;
   if (geo && typeof geo === "object") {
     const { lat, lon, accuracy } = geo;
-    if (Number.isFinite(lat) && Number.isFinite(lon)) {
-      cleanGeo = { lat, lon, accuracy: Number.isFinite(accuracy) ? accuracy : null };
-    }
+    if (Number.isFinite(lat) && Number.isFinite(lon)) cleanGeo = { lat, lon, accuracy: Number.isFinite(accuracy) ? accuracy : null };
   }
 
   const record = {
@@ -275,18 +251,13 @@ app.post("/api/ping", (req, res) => {
   if (!token) return res.status(400).json({ error: "token is required" });
 
   let decoded;
-  try {
-    decoded = jwt.verify(token, JWT_SECRET);
-  } catch {
-    return res.status(401).json({ error: "Invalid/expired token" });
-  }
+  try { decoded = jwt.verify(token, JWT_SECRET); }
+  catch { return res.status(401).json({ error: "Invalid/expired token" }); }
 
   let cleanGeo = null;
   if (geo && typeof geo === "object") {
     const { lat, lon, accuracy } = geo;
-    if (Number.isFinite(lat) && Number.isFinite(lon)) {
-      cleanGeo = { lat, lon, accuracy: Number.isFinite(accuracy) ? accuracy : null };
-    }
+    if (Number.isFinite(lat) && Number.isFinite(lon)) cleanGeo = { lat, lon, accuracy: Number.isFinite(accuracy) ? accuracy : null };
   }
 
   const record = {
@@ -304,7 +275,6 @@ app.post("/api/ping", (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- PDF ----------
 app.post("/api/pdf", async (req, res) => {
   const { orderNumber, pickupLocation, deliveryLocation, expiresInMinutes, token } = req.body || {};
   if (!orderNumber || !pickupLocation || !deliveryLocation || !token) {
@@ -313,7 +283,7 @@ app.post("/api/pdf", async (req, res) => {
 
   const baseUrl = baseUrlFromReq(req);
 
-  const landingUrl = `${baseUrl}/s/${createShortCode(token)}`; // full UI
+  const landingUrl = `${baseUrl}/s/${createShortCode(token)}`;
   const pickupUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=PICKED_UP`;
   const deliveredUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=DELIVERED`;
   const delayUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=DELAY`;
@@ -361,12 +331,7 @@ app.post("/api/pdf", async (req, res) => {
   doc.font("Helvetica-Bold").fontSize(14).text("Driver steps", stepsX, y);
   doc.font("Helvetica").fontSize(12).fillColor("#000");
 
-  const steps = [
-    "1) Tap a PDF button (Pick up / Delivered / Delay).",
-    "2) Browser opens.",
-    "3) Allow location (recommended).",
-    "4) Submitted."
-  ];
+  const steps = ["1) Tap a PDF button.", "2) Browser opens.", "3) Allow location (recommended).", "4) Submitted."];
   let sy = y + 24;
   for (const s of steps) { doc.text(s, stepsX, sy, { width: stepsW }); sy += 18; }
 
