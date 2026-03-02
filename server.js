@@ -145,7 +145,6 @@ app.post("/api/link", async (req, res) => {
   res.json({ token, link, shortLanding, qrDataUrl, dashboard, expiresInMinutes: effectiveTtl });
 });
 
-// NEW: Only orderNumber
 app.post("/api/start", (req, res) => {
   const { orderNumber, ttlMinutes } = req.body || {};
   if (!orderNumber) return res.status(400).json({ error: "orderNumber is required" });
@@ -231,16 +230,16 @@ app.post("/api/submit", (req, res) => {
   }
 
   const record = {
-  id: nanoid(12),
-  receivedAtUtc: new Date().toISOString(),
-  orderNumber: decoded.orderNumber,
-  milestoneType,
-  source: source ? String(source) : "WEB",
-  delayReason: milestoneType === "DELAY" ? String(delayReason) : null,
-  delayNotes: milestoneType === "DELAY" ? String(delayNotes || "") : null,
-  geo: cleanGeo,
-  gpsMissing: !cleanGeo
-};
+    id: nanoid(12),
+    receivedAtUtc: new Date().toISOString(),
+    orderNumber: decoded.orderNumber,
+    milestoneType,
+    source: source ? String(source) : "WEB",
+    delayReason: milestoneType === "DELAY" ? String(delayReason) : null,
+    delayNotes: milestoneType === "DELAY" ? String(delayNotes || "") : null,
+    geo: cleanGeo,
+    gpsMissing: !cleanGeo
+  };
 
   appendMilestone(record);
   publish(decoded.orderNumber, record);
@@ -276,98 +275,47 @@ app.post("/api/ping", (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- PDF ----------
-// ---------- PDF (FRO-style, 2 pages, bounded layout) ----------
-// ---------- PDF (FRO sample-matching layout: 2 pages, fixed boxes, side-by-side QRs) ----------
-// ---------- PDF (sample-like layout: clean Page-1, fixed Page-2, no overlap on delay) ----------
+// ---------- PDF GENERATION (Optimized to Sample) ----------
 app.post("/api/pdf", async (req, res) => {
   const {
-    orderNumber,
-    pickupLocation,
-    deliveryLocation,
-    expiresInMinutes,
-    token,
-
-    bookingNumber,
-    blNumber,
-    customerName,
-    forwardingOrderNumber,
-    transportMode,
-    oceanCarrier,
-    moveType,
-    earliestPortReceiptDate,
-    vesselCutoffDate,
-    vesselDepartureDate,
-    vesselVoyage,
-
-    placeOfReceipt,
-    portOfLoading,
-    nextPort,
-    portOfDischarge,
-    placeOfDelivery,
-
-    equipmentType,
-    containerSeal,
-    tareWeight,
-    totalWeight,
-
-    cargoDescription,
-    packageDescription,
-    packageQty,
-    packageWeight,
-    packageUom,
-    hsCode,
-    bondedGoods,
-
-    stageFrom,
-    stageTo,
-    appointmentFrom,
-    appointmentTo,
-
-    totalCost,
-    detailedCostLine1,
-    detailedCostLine2,
-    remarks
+    orderNumber, pickupLocation, deliveryLocation, token, bookingNumber, blNumber,
+    customerName, forwardingOrderNumber, transportMode, oceanCarrier, moveType,
+    earliestPortReceiptDate, vesselCutoffDate, vesselDepartureDate, vesselVoyage,
+    placeOfReceipt, portOfLoading, nextPort, portOfDischarge, placeOfDelivery,
+    equipmentType, containerSeal, tareWeight, totalWeight, cargoDescription,
+    packageDescription, packageQty, packageWeight, packageUom, hsCode, bondedGoods,
+    stageFrom, stageTo, appointmentFrom, appointmentTo, totalCost,
+    detailedCostLine1, detailedCostLine2, remarks
   } = req.body || {};
 
   if (!orderNumber || !token) {
-    return res.status(400).json({ error: "Missing required fields for PDF: orderNumber, token" });
+    return res.status(400).json({ error: "Missing orderNumber or token" });
   }
 
   const baseUrl = baseUrlFromReq(req);
-
-  // Links
   const landingUrl = `${baseUrl}/s/${createShortCode(token)}`;
   const pickupUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=PICKED_UP`;
   const deliveredUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=DELIVERED`;
   const delayUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=DELAY`;
 
-  // WhatsApp QR
-  const whatsappNumber = "447345485597"; // +44-7345485597 -> digits only
-  const whatsappText = `Order ${orderNumber}`;
-  const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(whatsappText)}`;
+  const whatsappNumber = "447345485597";
+  const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent("Order " + orderNumber)}`;
 
   const driverQrPng = await QRCode.toBuffer(landingUrl, { width: 420, margin: 1 });
   const whatsappQrPng = await QRCode.toBuffer(whatsappUrl, { width: 420, margin: 1 });
 
-  // Dummy defaults (like sample)
   const d = {
     dispatcher: "Dispatcher",
-    dispatcherPhone: "",
     dispatcherEmail: "nl.execution@lns.maersk.com",
     systemDate: new Date().toLocaleString("en-GB").replace(",", ""),
-
     transportByName: "CONTARGO WOERTH GMBH",
     transportByStreet: "HAFENSTRASSE",
     transportByCity: "76744 Woerth a Rhein",
     transportByCountry: "Germany",
-
     bookingNumber: bookingNumber || String(orderNumber),
     blNumber: blNumber || String(orderNumber),
     customerName: customerName || "MERCEDES BENZ AG",
-    workOrderNumber: String(orderNumber),
     forwardingOrderNumber: forwardingOrderNumber || "7003175564",
-
     transportMode: transportMode || "Truck",
     oceanCarrier: oceanCarrier || "MAEU / Maersk A/S",
     moveType: moveType || "Export",
@@ -375,18 +323,15 @@ app.post("/api/pdf", async (req, res) => {
     vesselCutoffDate: vesselCutoffDate || "28.02.2026 07:00:00",
     vesselDepartureDate: vesselDepartureDate || "02.03.2026 18:00:00",
     vesselVoyage: vesselVoyage || "MAREN MAERSK/608E",
-
-    placeOfReceipt: placeOfReceipt || (pickupLocation || "Woerth a Rhein, Rhineland Palatinate, Germany"),
-    portOfLoading: portOfLoading || "NLROT - APM 2 Terminal Maasvlakte II, Rotterdam, Netherlands",
+    placeOfReceipt: placeOfReceipt || (pickupLocation || "Woerth a Rhein, Germany"),
+    portOfLoading: portOfLoading || "NLROT - APM 2 Terminal Maasvlakte II, Netherlands",
     nextPort: nextPort || "Pelabuhan Tanjung Pelepas Terminal, Malaysia",
     portOfDischarge: portOfDischarge || "Tianjin PAC Intl Cntr Terminal, China",
     placeOfDelivery: placeOfDelivery || (deliveryLocation || "Xingang, Tianjin, China"),
-
     equipmentType: equipmentType || `40 DRY 9'6"`,
     containerSeal: containerSeal || "TSK6018425",
     tareWeight: tareWeight || "3880 KG",
     totalWeight: totalWeight || "6308.6 KG",
-
     cargoDescription: cargoDescription || `Autoparts - Order ${orderNumber}`,
     packageDescription: packageDescription || "COLLI",
     packageQty: packageQty || "36",
@@ -394,24 +339,18 @@ app.post("/api/pdf", async (req, res) => {
     packageUom: packageUom || "KGM",
     hsCode: hsCode || "870829",
     bondedGoods: bondedGoods || "No",
-
-    stageFrom: stageFrom || (pickupLocation || "Contargo Woerth / HAFENSTR. 1 / Woerth a Rhein / DE"),
-    stageTo: stageTo || (deliveryLocation || "APM 2 Terminal Maasvlakte II / Europaweg 910 / Rotterdam / NL"),
+    stageFrom: stageFrom || (pickupLocation || "Contargo Woerth / Woerth a Rhein / DE"),
+    stageTo: stageTo || (deliveryLocation || "APM 2 Terminal Maasvlakte II / Rotterdam / NL"),
     appointmentFrom: appointmentFrom || "23.02.2026 07:00:00",
     appointmentTo: appointmentTo || "25.02.2026 14:21:35",
-
     totalCost: totalCost || "463,80 EUR",
     detailedCostLine1: detailedCostLine1 || "Barge 389,00 EUR",
     detailedCostLine2: detailedCostLine2 || "Intermodal Fuel Surcharge 74,80 EUR",
     remarks: remarks || "—"
   };
 
-  // Response headers
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename="FRO_${String(orderNumber).replace(/[^a-zA-Z0-9_-]/g, "")}.pdf"`
-  );
+  res.setHeader("Content-Disposition", `attachment; filename="FRO_${String(orderNumber)}.pdf"`);
 
   const doc = new PDFDocument({ size: "A4", margin: 28 });
   doc.pipe(res);
@@ -420,218 +359,74 @@ app.post("/api/pdf", async (req, res) => {
   const R = doc.page.width - doc.page.margins.right;
   const W = R - L;
 
-  const thin = () => doc.strokeColor("#000").lineWidth(0.6);
-  const box = (x, y, w, h) => { thin(); doc.rect(x, y, w, h).stroke(); };
-  const hline = (y) => { thin(); doc.moveTo(L, y).lineTo(R, y).stroke(); };
-
+  const box = (x, y, w, h) => doc.strokeColor("#000").lineWidth(0.6).rect(x, y, w, h).stroke();
   const txt = (s, x, y, size = 9, bold = false, opts = {}) => {
-    doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(size).fillColor("#000")
-      .text(String(s ?? ""), x, y, opts);
+    doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(size).fillColor("#000").text(String(s ?? ""), x, y, opts);
   };
 
-  // label + value (sample style): label bold, value normal, aligned column
-  const row = (label, value, xLabel, xValue, y, valueWidth) => {
-    txt(label, xLabel, y, 9, true, { width: xValue - xLabel - 6 });
-    txt(value, xValue, y, 9, false, { width: valueWidth, lineBreak: false, ellipsis: true });
-  };
-
-  // ===================== PAGE 1 =====================
-  // top dispatcher line
-  txt(
-    `Dispatcher: ${d.dispatcher}        Dispatcher phone: ${d.dispatcherPhone}        Dispatcher email: ${d.dispatcherEmail}        System date: ${d.systemDate}`,
-    L,
-    18,
-    8,
-    false
-  );
-
-  // logo placeholder + title centered (sample has logo left, title centered)
+  // --- PAGE 1 ---
+  txt(`Dispatcher: Dispatcher    Dispatcher email: ${d.dispatcherEmail}    System date: ${d.systemDate}`, L, 18, 8);
   box(L + 6, 60, 26, 26);
   txt("M", L + 15, 66, 14, true);
   txt("Export Work Order", L, 62, 22, true, { width: W, align: "center" });
 
-  // Left section positions (match sample layout)
-  const xLabelL = L + 70;
-  const xValueL = L + 220;
+  const xL1 = L + 70, xL2 = L + 210, xR1 = L + 360, xR2 = L + 510;
+  txt("Transport By", xL1, 205, 9, true);
+  txt(d.transportByName, xL2, 205, 9, true);
+  txt(d.transportByStreet, xL2, 218, 9);
+  txt(d.transportByCity, xL2, 230, 9);
 
-  // Right section positions
-  const xLabelR = L + 360;
-  const xValueR = L + 540;
+  const row = (l, v, x1, x2, y) => { txt(l, x1, y, 9, true); txt(v, x2, y, 9, false, { width: 150 }); };
+  row("Booking Number", d.bookingNumber, xL1, xL2, 265);
+  row("B/L Number", d.blNumber, xL1, xL2, 280);
+  row("Customer Name", d.customerName, xL1, xL2, 295);
 
-  // Transport by block (left)
-  txt("Transport By", xLabelL, 210, 9, true);
-  txt(d.transportByName, xValueL, 200, 9, true);
-  txt(d.transportByStreet, xValueL, 214, 9, false);
-  txt(d.transportByCity, xValueL, 228, 9, false);
-  txt(d.transportByCountry, xValueL, 242, 9, false);
+  row("Work Order No", orderNumber, xR1, xR2, 205);
+  row("Transport Mode", d.transportMode, xR1, xR2, 220);
+  row("Ocean Carrier", d.oceanCarrier, xR1, xR2, 235);
+  row("Vessel/Voyage", d.vesselVoyage, xR1, xR2, 250);
 
-  // Booking / BL / Customer (left list)
-  row("Booking Number", d.bookingNumber, xLabelL, xValueL, 270, 260);
-  row("B/L Number", d.blNumber, xLabelL, xValueL, 288, 260);
-  row("Customer Name", d.customerName, xLabelL, xValueL, 306, 260);
+  txt("Port of Loading", xR1, 300, 9, true); txt(d.portOfLoading, xR2, 300, 8, false, { width: 140 });
+  txt("Port of Discharge", xR1, 335, 9, true); txt(d.portOfDischarge, xR2, 335, 8, false, { width: 140 });
 
-  // Right list (like sample)
-  row("Work Order Number", d.workOrderNumber, xLabelR, xValueR, 200, 220);
-  row("Forwarding Order Number", d.forwardingOrderNumber, xLabelR, xValueR, 218, 220);
+  box(L + 10, 500, W - 20, 40);
+  txt("Equipment & Cargo Details", L, 508, 11, true, { align: "center", width: W });
+  
+  box(L + 10, 550, W - 20, 80);
+  txt("Package", L + 20, 560, 9, true); txt("QTY", L + 250, 560, 9, true); txt("Weight", L + 350, 560, 9, true);
+  txt(d.packageDescription, L + 20, 580); txt(d.packageQty, L + 250, 580); txt(d.packageWeight, L + 350, 580);
 
-  row("Transport Mode", d.transportMode, xLabelR, xValueR, 246, 220);
-  row("Ocean Carrier", d.oceanCarrier, xLabelR, xValueR, 264, 220);
-  row("Move Type", d.moveType, xLabelR, xValueR, 282, 220);
+  txt(`Total cost ${d.totalCost}`, L + 10, 780, 11, true);
+  txt("Page 1 of 2", R - 80, 780, 9);
 
-  row("Earliest Port Receipt Date", d.earliestPortReceiptDate, xLabelR, xValueR, 310, 220);
-  row("Vessel Cutoff Date", d.vesselCutoffDate, xLabelR, xValueR, 328, 220);
-  row("Vessel Departure Date", d.vesselDepartureDate, xLabelR, xValueR, 346, 220);
-  row("Vessel/Voyage", d.vesselVoyage, xLabelR, xValueR, 364, 220);
-
-  row("Place of Receipt", d.placeOfReceipt, xLabelR, xValueR, 392, 220);
-  row("Port of Loading", d.portOfLoading, xLabelR, xValueR, 410, 220);
-  row("Next Port", d.nextPort, xLabelR, xValueR, 428, 220);
-  row("Port of Discharge", d.portOfDischarge, xLabelR, xValueR, 446, 220);
-  row("Place of Delivery", d.placeOfDelivery, xLabelR, xValueR, 464, 220);
-
-  // Equipment & Cargo header with lines (sample)
-  hline(510);
-  txt("Equipment and Cargo Details", L, 516, 11, true, { width: W, align: "center" });
-  hline(534);
-
-  // Equipment table (sample style)
-  const eqTop = 548;
-  txt("Equipment Type", L + 30, eqTop, 9, true);
-  txt("Container", L + 220, eqTop, 9, true);
-  txt("Seal", L + 320, eqTop, 9, true);
-  txt("Tare", L + 420, eqTop, 9, true);
-  txt("Total Weight", L + 500, eqTop, 9, true);
-
-  txt(d.equipmentType, L + 30, eqTop + 18, 9, false);
-  txt("", L + 220, eqTop + 18, 9, false);
-  txt(d.containerSeal, L + 320, eqTop + 18, 9, false);
-  txt(d.tareWeight, L + 420, eqTop + 18, 9, false);
-  txt(d.totalWeight, L + 500, eqTop + 18, 9, false);
-
-  // Cargo details block with borders like sample
-  txt("Cargo details", L + 12, 598, 9, true);
-
-  // Cargo description row (border)
-  box(L + 10, 614, W - 20, 22);
-  txt("Cargo Description:", L + 18, 620, 9, true);
-  txt(d.cargoDescription, L + 150, 620, 9, false);
-
-  // Package header table (bordered)
-  box(L + 10, 636, W - 20, 52);
-  thin(); doc.moveTo(L + 10, 656).lineTo(R - 10, 656).stroke();
-
-  // vertical lines
-  const v1 = L + 290, v2 = L + 350, v3 = L + 450, v4 = L + 560;
-  thin(); doc.moveTo(v1, 636).lineTo(v1, 688).stroke();
-  thin(); doc.moveTo(v2, 636).lineTo(v2, 688).stroke();
-  thin(); doc.moveTo(v3, 636).lineTo(v3, 688).stroke();
-  thin(); doc.moveTo(v4, 636).lineTo(v4, 688).stroke();
-
-  txt("Package Description", L + 20, 642, 9, true);
-  txt("Package QTY", v1 + 10, 642, 9, true);
-  txt("Weight", v2 + 10, 642, 9, true);
-  txt("Unit of\nMeasurement", v3 + 10, 640, 9, true);
-  txt("HS Code", v4 + 10, 642, 9, true);
-
-  txt(d.packageDescription, L + 140, 664, 9, false);
-  txt(d.packageQty, v1 + 20, 664, 9, false);
-  txt(d.packageWeight, v2 + 20, 664, 9, false);
-  txt(d.packageUom, v3 + 40, 664, 9, false);
-  txt(d.hsCode, v4 + 20, 664, 9, false);
-
-  txt("Bonded Goods", L + 12, 704, 9, false);
-  txt(d.bondedGoods, L + 130, 704, 9, false);
-
-  // Stage table (bordered) like sample
-const stTop = 720;
-box(L + 10, stTop, W - 20, 80);
-  thin(); doc.moveTo(L + 10, stTop + 22).lineTo(R - 10, stTop + 22).stroke();
-
-  txt("Stage", L + 20, stTop + 6, 9, true);
-  txt("From", L + 160, stTop + 6, 9, true);
-  txt("To", L + 430, stTop + 6, 9, true);
-
-txt("1", L + 24, stTop + 28, 9, true);
-txt(d.stageFrom, L + 160, stTop + 28, 9, false, { width: 240 });
-txt(d.stageTo, L + 430, stTop + 28, 9, false, { width: 240 });
-
-txt(`Appointment Arrival: ${d.appointmentFrom}`, L + 160, stTop + 56, 9, false);
-txt(`Appointment Arrival: ${d.appointmentTo}`, L + 430, stTop + 56, 9, false);
-
-  txt(`Total cost ${d.totalCost}`, L + 10, 805, 10, true);
-txt("Page 1 of 2", R - 90, 805, 9, false);
-
-  // ===================== PAGE 2 =====================
+  // --- PAGE 2 ---
   doc.addPage();
+  txt("Export Work Order - Driver Page", L, 40, 18, true);
+  
+  txt("Detailed Cost", L, 100, 14, true);
+  box(L, 120, W, 50);
+  txt(d.detailedCostLine1, L + 15, 130);
+  txt(d.detailedCostLine2, L + 15, 145);
 
-  const L2 = doc.page.margins.left;
-  const R2 = doc.page.width - doc.page.margins.right;
-  const W2 = R2 - L2;
-
-  const box2 = (x, y, w, h) => { doc.strokeColor("#000").lineWidth(0.6); doc.rect(x, y, w, h).stroke(); };
-  const txt2 = (s, x, y, size = 9, bold = false, opts = {}) => {
-    doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(size).fillColor("#000")
-      .text(String(s ?? ""), x, y, opts);
+  txt("Milestone Update", L, 200, 14, true);
+  const btn = (lbl, url, y) => {
+    box(L + 20, y, W - 40, 30);
+    doc.link(L + 20, y, W - 40, 30, url);
+    txt(lbl, L + 35, y + 10, 11, true);
   };
+  btn(`PICK UP: ${d.placeOfReceipt}`, pickupUrl, 230);
+  btn(`DELIVERED: ${d.placeOfDelivery}`, deliveredUrl, 270);
+  btn("REPORT DELAY", delayUrl, 310);
 
-  txt2(
-    `Dispatcher: ${d.dispatcher}        Dispatcher phone: ${d.dispatcherPhone}        Dispatcher email: ${d.dispatcherEmail}        System date: ${new Date().toLocaleString("en-GB").replace(",", "")}`,
-    L2,
-    18,
-    8,
-    false
-  );
-  txt2("Export Work Order", L2, 52, 26, true);
-  txt2("Page 2 of 2", R2 - 90, 60, 9, false);
+  txt("Scan QR Codes", L, 380, 14, true);
+  box(L, 400, W, 250);
+  doc.image(driverQrPng, L + 40, 430, { width: 160 });
+  doc.image(whatsappQrPng, L + 280, 430, { width: 160 });
+  txt("Driver Portal", L + 80, 600, 10, true);
+  txt("WhatsApp Update", L + 310, 600, 10, true);
 
-  // Detailed cost
-  txt2("Detailed Cost", L2, 110, 14, true);
-  box2(L2, 130, W2, 68);
-  txt2(d.detailedCostLine1, L2 + 16, 146, 12, false);
-  txt2(d.detailedCostLine2, L2 + 16, 168, 12, false);
-
-  // Milestone Update
-  txt2("Milestone Update (Tap buttons)", L2, 220, 14, true);
-  box2(L2, 242, W2, 132);
-
-  const mx = L2 + 14;
-  const mw = W2 - 28;
-  const mh = 30;
-
-  const tap = (label, url, y) => {
-    box2(mx, y, mw, mh);
-    doc.link(mx, y, mw, mh, url);
-    txt2(label, mx + 10, y + 8, 12, true);
-  };
-
-  tap(`PICK UP (from ${pickupLocation || d.placeOfReceipt})`, pickupUrl, 254);
-  tap(`DELIVERED (at ${deliveryLocation || d.placeOfDelivery})`, deliveredUrl, 290);
-  tap("DELAY (reason page)", delayUrl, 326);
-
-  // ✅ FIX: note goes OUTSIDE the box (no overlap)
-  txt2("If location is blocked, event still submits (without GPS).", L2, 380, 9, false);
-
-  // QRs side-by-side inside one boundary
-  txt2("Scan QR Codes", L2, 420, 14, true);
-  box2(L2, 442, W2, 290);
-
-  const qrSize = 190;
-  const qy = 480;
-  const qx1 = L2 + 40;
-  const qx2 = L2 + 320;
-
-  txt2("Driver page", qx1, 456, 11, true);
-  txt2("WhatsApp (share order)", qx2, 456, 11, true);
-
-  doc.image(driverQrPng, qx1, qy, { fit: [qrSize, qrSize] });
-  doc.image(whatsappQrPng, qx2, qy, { fit: [qrSize, qrSize] });
-
-  txt2(`WhatsApp to +44 7345 485597 with: "Order ${orderNumber}"`, qx2, qy + qrSize + 14, 10, false);
-
-  // Remarks
-  txt2("Remarks", L2, 748, 14, true);
-  box2(L2, 770, W2, 44);
-  txt2(d.remarks, L2 + 12, 782, 10, false, { width: W2 - 24 });
+  txt(`Remarks: ${d.remarks}`, L, 700, 11, true);
+  txt("Page 2 of 2", R - 80, 780, 9);
 
   doc.end();
 });
