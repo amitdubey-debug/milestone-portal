@@ -95,11 +95,16 @@
       return;
     }
 
-    const r = await fetch("/api/submit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, milestoneType: type, geo })
-    });
+ const r = await fetch("/api/submit", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    token,
+    milestoneType: type,
+    geo,
+    source: "PDF"
+  })
+});
 
     const data = await r.json().catch(() => ({}));
     if (!r.ok) {

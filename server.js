@@ -209,7 +209,7 @@ app.get("/api/stream", (req, res) => {
 });
 
 app.post("/api/submit", (req, res) => {
-  const { token, milestoneType, delayReason, delayNotes, geo } = req.body || {};
+  const { token, milestoneType, delayReason, delayNotes, geo, source } = req.body || {};
   if (!token || !milestoneType) return res.status(400).json({ error: "token and milestoneType are required" });
 
   let decoded;
@@ -231,15 +231,16 @@ app.post("/api/submit", (req, res) => {
   }
 
   const record = {
-    id: nanoid(12),
-    receivedAtUtc: new Date().toISOString(),
-    orderNumber: decoded.orderNumber,
-    milestoneType,
-    delayReason: milestoneType === "DELAY" ? String(delayReason) : null,
-    delayNotes: milestoneType === "DELAY" ? String(delayNotes || "") : null,
-    geo: cleanGeo,
-    gpsMissing: !cleanGeo
-  };
+  id: nanoid(12),
+  receivedAtUtc: new Date().toISOString(),
+  orderNumber: decoded.orderNumber,
+  milestoneType,
+  source: source ? String(source) : "WEB",
+  delayReason: milestoneType === "DELAY" ? String(delayReason) : null,
+  delayNotes: milestoneType === "DELAY" ? String(delayNotes || "") : null,
+  geo: cleanGeo,
+  gpsMissing: !cleanGeo
+};
 
   appendMilestone(record);
   publish(decoded.orderNumber, record);
