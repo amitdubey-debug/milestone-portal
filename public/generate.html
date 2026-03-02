@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Generate Milestone Link</title>
+  <style>
+    body{font-family:system-ui;margin:0;background:#f6f7fb}
+    .wrap{max-width:900px;margin:24px auto;padding:16px}
+    .card{background:#fff;border-radius:16px;padding:18px;box-shadow:0 6px 20px rgba(0,0,0,.06)}
+    h1{margin:0 0 12px;font-size:20px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .field label{display:block;font-size:13px;color:#445;margin-bottom:6px}
+    input{width:100%;padding:10px;border:1px solid #dde;border-radius:12px;font-size:14px}
+    button{margin-top:12px;padding:12px 14px;border-radius:12px;border:1px solid #111;background:#111;color:#fff;font-weight:700;cursor:pointer}
+    button.secondary{background:#fff;color:#111;border:1px solid #ccd}
+    .out{margin-top:12px;padding:12px;border:1px dashed #ccd;border-radius:12px;background:#fafbff}
+    a{word-break:break-all}
+    .muted{color:#667;font-size:13px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .qrWrap{display:none;margin-top:12px}
+    .qrBox{background:#fff;border:1px solid #dde;border-radius:14px;padding:12px;display:inline-block}
+    .qrBox img{width:220px;height:220px;display:block}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Generate tokenised milestone link</h1>
+      <div class="muted">
+        Enter order + pickup/delivery. Token lifetime is in minutes (e.g. 10080 = 7 days).
+      </div>
+
+      <div class="grid" style="margin-top:12px">
+        <div class="field">
+          <label>Order number</label>
+          <input id="orderNumber" placeholder="MAEU1234567" />
+        </div>
+
+        <div class="field">
+          <label>Token lifetime (minutes)</label>
+          <input id="ttlMinutes" placeholder="10080" />
+        </div>
+
+        <div class="field">
+          <label>Pick up location</label>
+          <input id="pickupLocation" placeholder="Bremerhaven Port" />
+        </div>
+
+        <div class="field">
+          <label>Delivery location</label>
+          <input id="deliveryLocation" placeholder="Hamburg DC" />
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="genBtn">Generate link</button>
+        <button id="pdfBtn" class="secondary" style="display:none;">Download PDF (with QR)</button>
+      </div>
+
+      <div class="out" id="out" style="display:none;"></div>
+
+      <div class="qrWrap" id="qrWrap">
+        <div class="muted" style="margin-bottom:6px;">Scan QR to open the milestone page</div>
+        <div class="qrBox">
+          <img id="qrImg" alt="QR code" />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- QR + PDF libs (client-side) -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+  <script src="/generate.js"></script>
+</body>
+</html>

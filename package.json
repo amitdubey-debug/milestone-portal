@@ -1,0 +1,19 @@
+{
+  "name": "milestone-portal",
+  "version": "1.0.0",
+  "description": "Tokenised link generator + milestone submission portal",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "nanoid": "^5.0.7"
+  }
+}
