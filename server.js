@@ -429,10 +429,18 @@ app.post("/api/pdf", async (req, res) => {
       .text(String(s ?? ""), x, y, opts);
   };
 
+function oneLine(value, max = 42) {
+  const s = String(value ?? "");
+  if (s.length <= max) return s;
+  return s.slice(0, max - 1) + "…";
+}
+
 const row = (label, value, xLabel, xValue, y) => {
-  const valueWidth = (R - 10) - xValue; // always stay inside page
-  txt(label, xLabel, y, 9, true, { width: xValue - xLabel - 8 });
-  txt(value, xValue, y, 9, false, { width: valueWidth, ellipsis: true });
+  const labelW = (xValue - xLabel) - 8;
+  const valueW = (R - 10) - xValue; // small right padding
+
+  txt(label, xLabel, y, 9, true, { width: labelW });
+  txt(oneLine(value, 45), xValue, y, 9, false, { width: valueW });
 };
 
   // ===================== PAGE 1 =====================
@@ -455,8 +463,8 @@ const row = (label, value, xLabel, xValue, y) => {
   const xValueL = L + 220;
 
   // Right section positions
-const xLabelR = L + 340;   // move label column slightly left
-const xValueR = L + 500;   // move value column left (this is the big fix)
+const xLabelR = L + 330;   // move label column slightly left
+const xValueR = L + 470;   // move value column left (this is the big fix)
 
   // Transport by block (left)
   txt("Transport By", xLabelL, 210, 9, true);
@@ -483,11 +491,22 @@ const xValueR = L + 500;   // move value column left (this is the big fix)
   row("Vessel Departure Date", d.vesselDepartureDate, xLabelR, xValueR, 346, 220);
   row("Vessel/Voyage", d.vesselVoyage, xLabelR, xValueR, 364, 220);
 
-  row("Place of Receipt", d.placeOfReceipt, xLabelR, xValueR, 392, 220);
-  row("Port of Loading", d.portOfLoading, xLabelR, xValueR, 410, 220);
-  row("Next Port", d.nextPort, xLabelR, xValueR, 428, 220);
-  row("Port of Discharge", d.portOfDischarge, xLabelR, xValueR, 446, 220);
-  row("Place of Delivery", d.placeOfDelivery, xLabelR, xValueR, 464, 220);
+const valueW_R = (R - 10) - xValueR;
+
+txt("Place of Receipt", xLabelR, 392, 9, true);
+txt(d.placeOfReceipt, xValueR, 392, 8, false, { width: valueW_R });
+
+txt("Port of Loading", xLabelR, 410, 9, true);
+txt(d.portOfLoading, xValueR, 410, 8, false, { width: valueW_R });
+
+txt("Next Port", xLabelR, 428, 9, true);
+txt(d.nextPort, xValueR, 428, 8, false, { width: valueW_R });
+
+txt("Port of Discharge", xLabelR, 446, 9, true);
+txt(d.portOfDischarge, xValueR, 446, 8, false, { width: valueW_R });
+
+txt("Place of Delivery", xLabelR, 464, 9, true);
+txt(d.placeOfDelivery, xValueR, 464, 8, false, { width: valueW_R });
 
   // Equipment & Cargo header with lines (sample)
   hline(510);
@@ -627,7 +646,22 @@ txt("Page 1 of 2", R - 90, 770, 9, false);
   doc.image(whatsappQrPng, qx2, qy, { fit: [qrSize, qrSize] });
 
   txt2(`WhatsApp to +44 7345 485597 with: "Order ${orderNumber}"`, qx2, qy + qrSize + 14, 10, false);
+// Clickable one-click driver link
+const driverLinkLabel = "Driver link (one-click): ";
+const linkY = qy + qrSize + 34;
 
+txt2(driverLinkLabel, L2 + 40, linkY, 10, true);
+
+const linkX =
+  L2 + 40 +
+  doc.widthOfString(driverLinkLabel, { font: "Helvetica-Bold", size: 10 });
+
+txt2(landingUrl, linkX, linkY, 10, false, {
+  width: W2 - 60 - (linkX - L2)
+});
+
+// Make it clickable
+doc.link(linkX, linkY - 2, W2 - 60 - (linkX - L2), 14, landingUrl);
   // Remarks
   txt2("Remarks", L2, 748, 14, true);
   box2(L2, 770, W2, 44);
