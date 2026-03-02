@@ -147,13 +147,26 @@ app.post("/api/link", async (req, res) => {
 
 // NEW: Only orderNumber
 app.post("/api/start", (req, res) => {
-  const { orderNumber, ttlMinutes } = req.body || {};
-  if (!orderNumber) return res.status(400).json({ error: "orderNumber is required" });
+  const { orderNumber, pickupLocation, ttlMinutes } = req.body || {};
 
-  const { token } = mintToken({ orderNumber, ttlMinutes });
+  if (!orderNumber) {
+    return res.status(400).json({ error: "orderNumber is required" });
+  }
+  if (!pickupLocation) {
+    return res.status(400).json({ error: "pickupLocation is required" });
+  }
+
+  const { token } = mintToken({
+    orderNumber,
+    pickupLocation,
+    deliveryLocation: "Unknown delivery",
+    ttlMinutes
+  });
 
   const baseUrl = baseUrlFromReq(req);
+  // keep returning oneclick link (client extracts token + redirects to /milestone)
   const link = `${baseUrl}/oneclick?token=${encodeURIComponent(token)}`;
+
   res.json({ link });
 });
 

@@ -36,6 +36,7 @@
       width:100%;
     }
     .btn:active{transform:translateY(1px)}
+    .btn:disabled{opacity:.65;cursor:not-allowed;box-shadow:none}
     .status{
       margin-top:12px;border-radius:14px;border:1px dashed var(--border);background:#fbfcff;
       padding:10px 12px;font-size:14px;
@@ -49,9 +50,9 @@
 <body>
   <div class="wrap">
     <div class="card">
-      <h1>Open Driver Page</h1>
+      <h1>Open Driver Milestone Page</h1>
       <div class="muted">
-        Enter the Order Number. We’ll generate a token and open the driver update page.
+        Enter the Order Number and Pick up location/city. We’ll generate a token and open the milestone update page.
       </div>
 
       <div class="grid">
@@ -61,15 +62,15 @@
         </div>
 
         <div class="field">
-          <label>Token TTL Minutes (optional)</label>
-          <input id="ttl" placeholder="e.g. 1440 (1 day)" />
+          <label>Pick up location / city *</label>
+          <input id="pickupLocation" placeholder="e.g. Bremerhaven Port" />
         </div>
 
         <button class="btn" id="goBtn">Open</button>
 
         <div class="status" id="status">Ready.</div>
         <div class="note">
-          For production: you’d verify order ownership before issuing a token.
+          (Demo) In production you’d verify order ownership before issuing a token.
         </div>
       </div>
     </div>
@@ -85,28 +86,60 @@
     else statusEl.textContent = msg;
   }
 
-  goBtn.addEventListener("click", async () => {
+  async function openDriverPage(){
     const orderNumber = document.getElementById("orderNumber").value.trim();
-    const ttlMinutesRaw = document.getElementById("ttl").value.trim();
+    const pickupLocation = document.getElementById("pickupLocation").value.trim();
 
     if (!orderNumber) return setStatus("Order Number is required.", "err");
+    if (!pickupLocation) return setStatus("Pick up location / city is required.", "err");
 
-    const ttlMinutes = ttlMinutesRaw ? Number(ttlMinutesRaw) : undefined;
-    if (ttlMinutesRaw && !Number.isFinite(ttlMinutes)) return setStatus("TTL must be a number.", "err");
+    goBtn.disabled = true;
+    setStatus("Generating token…");
 
-    setStatus("Generating…");
+    try{
+      const r = await fetch("/api/start", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({
+          orderNumber,
+          pickupLocation,
+          ttlMinutes: 60 * 24 * 7 // optional 7 days
+        })
+      });
 
-    const r = await fetch("/api/start", {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ orderNumber, ttlMinutes })
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok){
+        goBtn.disabled = false;
+        return setStatus(data.error || "Failed", "err");
+      }
+
+      // data.link is returned as /oneclick?token=...
+      // We want /milestone?token=...
+      const link = new URL(data.link, location.origin);
+      const token = link.searchParams.get("token");
+
+      if (!token){
+        goBtn.disabled = false;
+        return setStatus("Server did not return token.", "err");
+      }
+
+      const milestoneUrl = `/milestone?token=${encodeURIComponent(token)}`;
+      setStatus(`Opening: <a href="${milestoneUrl}">${location.origin}${milestoneUrl}</a>`, "ok");
+      window.location.href = milestoneUrl;
+
+    }catch(e){
+      goBtn.disabled = false;
+      setStatus("Network error. Please try again.", "err");
+    }
+  }
+
+  goBtn.addEventListener("click", openDriverPage);
+
+  // Enter key support
+  ["orderNumber","pickupLocation"].forEach(id=>{
+    document.getElementById(id).addEventListener("keydown", (e)=>{
+      if(e.key === "Enter") openDriverPage();
     });
-
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) return setStatus(data.error || "Failed", "err");
-
-    setStatus(`Opening: <a href="${data.link}">${data.link}</a>`, "ok");
-    window.location.href = data.link;
   });
 </script>
 </body>
