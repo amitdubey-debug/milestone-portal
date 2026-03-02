@@ -90,6 +90,7 @@ app.get("/generate", (req, res) => res.sendFile(path.join(__dirname, "public", "
 app.get("/dashboard", (req, res) => res.sendFile(path.join(__dirname, "public", "dashboard.html")));
 app.get("/milestone", (req, res) => res.sendFile(path.join(__dirname, "public", "milestone.html")));
 app.get("/oneclick", (req, res) => res.sendFile(path.join(__dirname, "public", "oneclick.html")));
+app.get("/quick", (req, res) => res.sendFile(path.join(__dirname, "public", "quick.html")));
 
 // ---------- Short links ----------
 app.get("/s/:code", (req, res) => {
@@ -98,14 +99,18 @@ app.get("/s/:code", (req, res) => {
   const entry = map[code];
   if (!entry?.token) return res.status(404).send("Invalid short link");
 
-  const url = new URL(`${baseUrlFromReq(req)}/oneclick`);
-  url.searchParams.set("token", entry.token);
-  if (req.query.type) url.searchParams.set("type", String(req.query.type));
-  res.redirect(url.toString());
+  // mode=quick -> redirect to /quick for one-tap submit UX
+  const mode = String(req.query.mode || "");
+  const type = req.query.type ? String(req.query.type) : "";
+
+  const target = new URL(`${baseUrlFromReq(req)}/${mode === "quick" ? "quick" : "oneclick"}`);
+  target.searchParams.set("token", entry.token);
+  if (type) target.searchParams.set("type", type);
+
+  res.redirect(target.toString());
 });
 
 // ---------- API ----------
-
 app.post("/api/link", async (req, res) => {
   const { orderNumber, pickupLocation, deliveryLocation, ttlMinutes } = req.body || {};
   if (!orderNumber || !pickupLocation || !deliveryLocation) {
@@ -132,10 +137,13 @@ app.post("/api/link", async (req, res) => {
   const baseUrl = baseUrlFromReq(req);
   const link = `${baseUrl}/milestone?token=${encodeURIComponent(token)}`;
 
+  // Landing short link should open full oneclick UI
   const landingCode = createShortCode(token);
   const shortLanding = `${baseUrl}/s/${landingCode}`;
+
   const dashboard = `${baseUrl}/dashboard?order=${encodeURIComponent(orderNumber)}`;
 
+  // QR should open "landing" (full page)
   const qrPngBuffer = await QRCode.toBuffer(shortLanding, { width: 360, margin: 1 });
   const qrDataUrl = `data:image/png;base64,${qrPngBuffer.toString("base64")}`;
 
@@ -212,6 +220,7 @@ app.post("/api/submit", (req, res) => {
     return res.status(400).json({ error: "delayReason is required when milestoneType=DELAY" });
   }
 
+  // geo is OPTIONAL now (already was, but we keep it explicit)
   let cleanGeo = null;
   if (geo && typeof geo === "object") {
     const { lat, lon, accuracy } = geo;
@@ -227,7 +236,8 @@ app.post("/api/submit", (req, res) => {
     milestoneType,
     delayReason: milestoneType === "DELAY" ? String(delayReason) : null,
     delayNotes: milestoneType === "DELAY" ? String(delayNotes || "") : null,
-    geo: cleanGeo
+    geo: cleanGeo,
+    gpsMissing: !cleanGeo // <-- flag for UI / dashboard
   };
 
   appendMilestone(record);
@@ -237,8 +247,8 @@ app.post("/api/submit", (req, res) => {
 
 /**
  * POST /api/ping
- * body: { token, geo, pingSource? }
- * Stores pingSource so dashboard can show why the ping happened.
+ * body: { token, geo?, pingSource? }
+ * IMPORTANT: geo is OPTIONAL now (we store ping even if no GPS).
  */
 app.post("/api/ping", (req, res) => {
   const { token, geo, pingSource } = req.body || {};
@@ -258,7 +268,6 @@ app.post("/api/ping", (req, res) => {
       cleanGeo = { lat, lon, accuracy: Number.isFinite(accuracy) ? accuracy : null };
     }
   }
-  if (!cleanGeo) return res.status(400).json({ error: "geo is required" });
 
   const record = {
     id: nanoid(12),
@@ -266,7 +275,8 @@ app.post("/api/ping", (req, res) => {
     orderNumber: decoded.orderNumber,
     milestoneType: "GPS_PING",
     pingSource: pingSource ? String(pingSource) : null,
-    geo: cleanGeo
+    geo: cleanGeo,
+    gpsMissing: !cleanGeo
   };
 
   appendMilestone(record);
@@ -274,7 +284,7 @@ app.post("/api/ping", (req, res) => {
   res.json({ ok: true });
 });
 
-// PDF endpoint (unchanged from your previous final version)
+// ---------- PDF (UPDATED LINKS: pickup/delivered go to QUICK) ----------
 app.post("/api/pdf", async (req, res) => {
   const { orderNumber, pickupLocation, deliveryLocation, expiresInMinutes, token } = req.body || {};
   if (!orderNumber || !pickupLocation || !deliveryLocation || !token) {
@@ -283,10 +293,13 @@ app.post("/api/pdf", async (req, res) => {
 
   const baseUrl = baseUrlFromReq(req);
 
-  const landingUrl = `${baseUrl}/s/${createShortCode(token)}`;
-  const pickupUrl = `${baseUrl}/s/${createShortCode(token)}?type=PICKED_UP`;
-  const deliveredUrl = `${baseUrl}/s/${createShortCode(token)}?type=DELIVERED`;
-  const delayUrl = `${baseUrl}/s/${createShortCode(token)}?type=DELAY`;
+  // Short codes:
+  // - QR opens full oneclick (landing)
+  // - buttons open quick submit
+  const landingUrl = `${baseUrl}/s/${createShortCode(token)}`; // full UI
+  const pickupUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=PICKED_UP`;
+  const deliveredUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=DELIVERED`;
+  const delayUrl = `${baseUrl}/s/${createShortCode(token)}?mode=quick&type=DELAY`;
 
   const qrPngBuffer = await QRCode.toBuffer(landingUrl, { width: 460, margin: 1 });
 
@@ -304,7 +317,7 @@ app.post("/api/pdf", async (req, res) => {
 
   doc.font("Helvetica-Bold").fontSize(18).fillColor("#000").text("Milestone Update", left, 56);
   doc.font("Helvetica").fontSize(11).fillColor("#555")
-    .text("Tap a button (PDF link) → browser opens → allow location → event sent.", left, 78);
+    .text("PDF buttons = one-tap submit. QR = open full page.", left, 78);
   doc.fillColor("#000");
 
   doc.moveTo(left, 100).lineTo(left + width, 100).strokeColor("#DDD").stroke();
@@ -331,7 +344,7 @@ app.post("/api/pdf", async (req, res) => {
   doc.font("Helvetica-Bold").fontSize(14).text("Driver steps", stepsX, y);
   doc.font("Helvetica").fontSize(12).fillColor("#000");
 
-  const steps = ["1) Scan QR or tap a PDF button.", "2) Browser opens on phone.", "3) Allow location.", "4) Done."];
+  const steps = ["1) Tap a PDF button (Pick up / Delivered / Delay).", "2) Browser opens.", "3) Allow location (recommended).", "4) Submitted."];
   let sy = y + 24;
   for (const s of steps) {
     doc.text(s, stepsX, sy, { width: stepsW });
@@ -352,15 +365,15 @@ app.post("/api/pdf", async (req, res) => {
     y += h + 10;
   }
 
-  linkBox(`[PICK UP]  ${pickupLocation}`, "Submit PICKED_UP with current GPS.", pickupUrl);
-  linkBox(`[DELIVERED]  ${deliveryLocation}`, "Submit DELIVERED with current GPS.", deliveredUrl);
-  linkBox(`[DELAY]`, "Open delay page (choose reason + submit with GPS).", delayUrl);
+  linkBox(`[PICK UP]  ${pickupLocation}`, "One-tap submit PICKED_UP (uses GPS if allowed).", pickupUrl);
+  linkBox(`[DELIVERED]  ${deliveryLocation}`, "One-tap submit DELIVERED (uses GPS if allowed).", deliveredUrl);
+  linkBox(`[DELAY]`, "Opens delay reason page (then submit).", delayUrl);
 
   y += 6;
   doc.moveTo(left, y).lineTo(left + width, y).strokeColor("#DDD").stroke();
   y += 14;
 
-  doc.font("Helvetica-Bold").fontSize(12).fillColor("#000").text("Fallback link (short):", left, y);
+  doc.font("Helvetica-Bold").fontSize(12).fillColor("#000").text("Fallback link (opens full page):", left, y);
   y += 16;
 
   doc.font("Helvetica").fontSize(11).fillColor("#000").text(landingUrl, left, y, { width });

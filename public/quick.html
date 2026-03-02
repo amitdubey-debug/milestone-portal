@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Submitting…</title>
+  <style>
+    body{
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      margin:0; padding:18px;
+      background: #f6f7ff;
+      color:#0f172a;
+    }
+    .card{
+      max-width:520px;
+      margin: 12px auto;
+      background:#fff;
+      border:1px solid #e6e9f5;
+      border-radius:18px;
+      padding:16px;
+      box-shadow: 0 12px 30px rgba(15,23,42,.10);
+    }
+    h1{ margin:0; font-size:18px; }
+    .muted{ color:#5b6477; margin-top:8px; line-height:1.35; }
+    .big{
+      margin-top:14px;
+      padding:14px;
+      border-radius:16px;
+      background:#fbfcff;
+      border:1px dashed #e6e9f5;
+      font-weight:900;
+    }
+    .warn{
+      margin-top:12px;
+      padding:12px;
+      border-radius:16px;
+      background: #fff7ed;
+      border:1px solid #fed7aa;
+      color:#92400e;
+      font-weight:800;
+    }
+    .ok{ color:#0a6; font-weight:900; }
+    .err{ color:#b91c1c; font-weight:900; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Submitting update…</h1>
+    <div class="muted" id="info">Please wait.</div>
+    <div class="big" id="result">Working…</div>
+    <div class="warn" id="gpsWarn" style="display:none;">
+      Sent without GPS. Please enable Location Services for better tracking.
+    </div>
+  </div>
+
+<script>
+  const url = new URL(location.href);
+  const token = url.searchParams.get("token");
+  const type = url.searchParams.get("type"); // PICKED_UP | DELIVERED | DELAY
+
+  const info = document.getElementById("info");
+  const result = document.getElementById("result");
+  const gpsWarn = document.getElementById("gpsWarn");
+
+  function humanType(t){
+    if (t === "PICKED_UP") return "PICK UP";
+    if (t === "DELIVERED") return "DELIVERED";
+    if (t === "DELAY") return "DELAY";
+    return t || "UNKNOWN";
+  }
+
+  async function tryGetGeo() {
+    if (!navigator.geolocation) return null;
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 7000, maximumAge: 0 }
+      );
+    });
+  }
+
+  async function run() {
+    if (!token || !type) {
+      result.innerHTML = `<span class="err">Missing token or type.</span>`;
+      return;
+    }
+
+    info.textContent = `Event: ${humanType(type)}`;
+    const geo = await tryGetGeo();
+
+    // DELAY requires reason -> redirect to full oneclick delay UI
+    if (type === "DELAY") {
+      location.href = `/oneclick?token=${encodeURIComponent(token)}&type=DELAY`;
+      return;
+    }
+
+    const r = await fetch("/api/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, milestoneType: type, geo })
+    });
+
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      result.innerHTML = `<span class="err">Failed: ${data.error || "Submit failed"}</span>`;
+      return;
+    }
+
+    result.innerHTML = `<span class="ok">Submitted ✅ ${humanType(type)}</span>`;
+    if (!geo) gpsWarn.style.display = "block";
+  }
+
+  run();
+</script>
+</body>
+</html>

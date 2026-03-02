@@ -28,7 +28,7 @@ const layers = {
 };
 
 const trailPts = [];
-const MAX_TRAIL_POINTS = 1500; // safety cap
+const MAX_TRAIL_POINTS = 1500;
 
 function safeLatLng(obj) {
   if (!obj) return null;
@@ -53,9 +53,7 @@ function redrawTrail() {
     map.removeLayer(layers.trail);
     layers.trail = null;
   }
-  if (trailPts.length >= 2) {
-    layers.trail = L.polyline(trailPts).addTo(map);
-  }
+  if (trailPts.length >= 2) layers.trail = L.polyline(trailPts).addTo(map);
 }
 
 function addRow(e) {
@@ -73,10 +71,12 @@ function addRow(e) {
   if (e.milestoneType === "GPS_PING" && e.pingSource) parts.push(`Source: ${e.pingSource}`);
   if (e.delayReason) parts.push(`Reason: ${e.delayReason}`);
   if (e.delayNotes) parts.push(`Notes: ${e.delayNotes}`);
+  if (e.gpsMissing) parts.push("No GPS");
   tdDet.textContent = parts.join(" • ") || "";
 
   const tdGeo = document.createElement("td");
-  if (e.geo?.lat && e.geo?.lon) {
+  const pt = safeLatLng(e.geo);
+  if (pt) {
     tdGeo.className = "mono";
     tdGeo.textContent =
       `${Number(e.geo.lat).toFixed(5)}, ${Number(e.geo.lon).toFixed(5)}${e.geo.accuracy ? ` (±${Math.round(e.geo.accuracy)}m)` : ""}`;
@@ -116,7 +116,7 @@ function renderAll(all) {
 
   for (const e of all) {
     addRow(e);
-    if (safeLatLng(e.geo)) addMapPoint(e);
+    addMapPoint(e);
   }
 
   summaryEl.textContent = `Loaded ${all.length} events`;
@@ -136,9 +136,7 @@ refreshBtn.addEventListener("click", async () => {
   }
 });
 
-// SSE
 const es = new EventSource(`/api/stream?order=${encodeURIComponent(order)}`);
-
 es.addEventListener("open", () => { statusEl.textContent = "Connected ✅"; });
 es.addEventListener("error", () => { statusEl.textContent = "Disconnected / retrying…"; });
 
