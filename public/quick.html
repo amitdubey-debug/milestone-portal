@@ -41,6 +41,13 @@
     }
     .ok{ color:#0a6; font-weight:900; }
     .err{ color:#b91c1c; font-weight:900; }
+    .ts{
+      display:block;
+      margin-top:8px;
+      font-weight:800;
+      color:#334155;
+      font-size:13px;
+    }
   </style>
 </head>
 <body>
@@ -69,6 +76,18 @@
     return t || "UNKNOWN";
   }
 
+  function formatNow(){
+    // Local time like: 02/03/2026, 17:45:12
+    return new Date().toLocaleString(undefined, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    });
+  }
+
   async function tryGetGeo() {
     if (!navigator.geolocation) return null;
     return new Promise((resolve) => {
@@ -95,16 +114,16 @@
       return;
     }
 
- const r = await fetch("/api/submit", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    token,
-    milestoneType: type,
-    geo,
-    source: "PDF"
-  })
-});
+    const r = await fetch("/api/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token,
+        milestoneType: type,
+        geo,
+        source: "PDF"
+      })
+    });
 
     const data = await r.json().catch(() => ({}));
     if (!r.ok) {
@@ -112,7 +131,12 @@
       return;
     }
 
-    result.innerHTML = `<span class="ok">Submitted ✅ ${humanType(type)}</span>`;
+    const ts = formatNow();
+    result.innerHTML = `
+      <span class="ok">Submitted ✅ ${humanType(type)}</span>
+      <span class="ts">Time: ${ts}</span>
+    `;
+
     if (!geo) gpsWarn.style.display = "block";
   }
 
